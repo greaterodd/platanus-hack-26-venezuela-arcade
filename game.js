@@ -70,7 +70,6 @@ const B_UP = 'P1_U';
 const B_DOWN = 'P1_D';
 const B_JUMP = 'P1_1';
 const B_USE = 'P1_2';
-const B_AIM = 'P1_3';
 const B_PREV = 'P1_4';
 const B_NEXT = 'P1_5';
 const B_MUTE = 'P1_6';
@@ -1481,7 +1480,7 @@ class TitleScene extends Phaser.Scene {
       ['CAMBIAR', 'BTN 4 / 5', (x, y) => TOOLS.slice(0, 3).forEach((t, i) => img(x + (i - 1) * 30, y + 6, 'tool_' + t))],
       [
         'APUNTAR',
-        'BTN 3 Y JOYSTICK',
+        'BTN 2 Y JOYSTICK',
         (x, y) => {
           img(x - 12, y, 'child', 0);
           img(x + 14, y - 22, 'reticle').setRotation(-PI / 4);
@@ -1496,7 +1495,7 @@ class TitleScene extends Phaser.Scene {
       else gfx.fillStyle(0x9a9a9a).fillRect(x, 264, 3, 12).fillStyle(0xff1a1a).fillRect(x - 3, 259, 9, 8);
       label(this, x, 292, btn, 0x8c8c8c).setDepth(21);
     });
-    label(this, mid, 314, 'ABAJO X2: BAJAR POR LAS VIGAS   PINTURA AMARILLA: SE ROMPE   BTN 6: SILENCIAR', 0x6a6a6a).setDepth(21);
+    label(this, mid, 314, 'ABAJOX2: BAJAR VIGAS   PINTURA AMARILLA: SE ROMPE   BTN 6: SILENCIAR', 0x6a6a6a).setDepth(21);
     this.pr = label(this, mid, 344, 'PULSA START', 0xffffff, 2).setDepth(21);
 
     const start = () => {
@@ -2256,11 +2255,11 @@ class GameScene extends Phaser.Scene {
 
     const grounded = body.blocked.down;
 
-    // Free aim: hold BUTTON 3 (O) and steer with the stick. The stick drives the
+    // Free aim / focus: hold BUTTON 2 and steer with the stick. The stick drives the
     // reticle instead of movement, so the child plants their feet while aiming.
     const hx = (down(B_RIGHT) ? 1 : 0) - (down(B_LEFT) ? 1 : 0);
     const vy = (down(B_DOWN) ? 1 : 0) - (down(B_UP) ? 1 : 0);
-    const aiming = (this.am = down(B_AIM));
+    const aiming = (this.am = down(B_USE));
     if (aiming) {
       if (hx || vy) {
         const q = (round(atan2(vy, hx) / (PI / 4)) * PI) / 4;
@@ -2341,7 +2340,7 @@ class GameScene extends Phaser.Scene {
     if (at(84, 90, 0, 12) && !this.fn.has('umbrella')) this.hn('chasm', 'Muy lejos para saltar... si tan solo algo frenara la caida.', 4000);
     if (this.fn.has('crowbar') && at(40, 48, 20, 27) && this.cr.has('45,26')) this.hn('floor', 'El piso aqui esta agrietado...');
     if (at(110, 130, 0, 9)) this.hn('bell', 'La gran campana. Hazla sonar.');
-    if (aiming) this.hn('freeaim', 'APUNTADO LIBRE - manten BOTON 3 y apunta con el joystick.', 3000);
+    if (aiming) this.hn('freeaim', 'APUNTADO LIBRE - manten BOTON 2 y apunta con el joystick.', 3000);
 
     // Free-aim reticle.
     this.rt
