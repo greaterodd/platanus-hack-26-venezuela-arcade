@@ -1493,6 +1493,16 @@ const whiteout = (scene, depth) => scene.add.rectangle(0, 0, SCREEN_W, SCREEN_H,
 const backdrop = (scene, key, y, depth) => scene.add.tileSprite(0, y, SCREEN_W, SCREEN_H, key).setOrigin(0).setScrollFactor(0).setDepth(depth);
 const range = (min, max) => ({ min, max });
 const ramp = (start, end) => ({ start, end });
+const aim8 = (hx, vy) => {
+  const q = (round(atan2(vy, hx) / (PI / 4)) * PI) / 4;
+  return [q, round(cos(q)), round(sin(q))];
+};
+const aimBox = (x, y, ax, ay, len, wide) => {
+  const along = 2 + len / 2;
+  const w = abs(ax) * len + abs(ay) * wide;
+  const h = abs(ay) * len + abs(ax) * wide;
+  return new Phaser.Geom.Rectangle(x + ax * along - w / 2, y - 12 + ay * along - h / 2, w, h);
+};
 
 // `level` (0..1) is how lit the world is right now — the game uses it to lift the darkness.
 class Storm {
@@ -2337,12 +2347,7 @@ class GameScene extends Phaser.Scene {
   // Axis-aligned hitbox extending from the player along the current aim vector.
   // `len` runs along the aim, `wide` across it; 8-way aim keeps it corner-correct.
   ab(len, wide) {
-    const ax = this.ax;
-    const ay = this.ay;
-    const along = 2 + len / 2;
-    const w = abs(ax) * len + abs(ay) * wide;
-    const h = abs(ay) * len + abs(ax) * wide;
-    return new Phaser.Geom.Rectangle(this.pl.x + ax * along - w / 2, this.pl.y - 12 + ay * along - h / 2, w, h);
+    return aimBox(this.pl.x, this.pl.y, this.ax, this.ay, len, wide);
   }
 
   // Melee hit on everything inside `box`.
@@ -2639,10 +2644,10 @@ class GameScene extends Phaser.Scene {
     const aiming = (this.am = down(B_USE));
     if (aiming) {
       if (hx || vy) {
-        const q = (round(atan2(vy, hx) / (PI / 4)) * PI) / 4;
-        this.aa = q;
-        this.ax = round(cos(q));
-        this.ay = round(sin(q));
+        const a = aim8(hx, vy);
+        this.aa = a[0];
+        this.ax = a[1];
+        this.ay = a[2];
         if (this.ax) this.fc = this.ax;
       }
     } else {
@@ -3231,7 +3236,7 @@ class VersusScene extends Phaser.Scene {
     this.u();
     this.M = 0;
     this.I = 0;
-    this.U = [this.add.rectangle(320, 280, 440, 190, 0x0e1320, 0.82).setStrokeStyle(1, 0x2b3648).setDepth(1), label(this, 320, 150, 'VERSUS', 0xff1a1a, 4).setDepth(20), label(this, 320, 240, '1 JUGADOR VS PC', 0xffffff, 2).setDepth(20), label(this, 320, 280, '2 JUGADORES', 0x8c8c8c, 2).setDepth(20), label(this, 320, 320, 'VOLVER AL INICIO', 0x8c8c8c, 2).setDepth(20)];
+    this.U = [this.add.rectangle(320, 280, 440, 190, 0x0e1320, 0.82).setStrokeStyle(1, 0x2b3648).setDepth(1), label(this, 320, 150, 'VERSUS', 0xff1a1a, 4).setDepth(20), label(this, 320, 240, '1 JUGADOR VS PC', 0xffffff, 2).setDepth(20), label(this, 320, 280, '2 JUGADORES', 0xb8b8b8, 2).setDepth(20), label(this, 320, 320, 'VOLVER AL INICIO', 0xb8b8b8, 2).setDepth(20)];
     this.l = [this.U[2], this.U[3], this.U[4]];
   }
 
@@ -3251,7 +3256,7 @@ class VersusScene extends Phaser.Scene {
       sound('newtool');
       return this.cs();
     }
-    this.l.forEach((t, i) => t.setTint(i === this.I ? 0xffffff : 0x8c8c8c));
+    this.l.forEach((t, i) => t.setTint(i === this.I ? 0xffffff : 0xb8b8b8));
   }
 
   cs() {
@@ -3268,7 +3273,7 @@ class VersusScene extends Phaser.Scene {
       const y = 216 + (floor(i / 2) - 0.5) * 98;
       const s = image(this, x, y, r.tex, 5, 0.5, 0.5, 0);
       s.setScale(64 / s.height);
-      return { x, y, s, n: label(this, x, y + 44, r.n, 0xc8c8c8) };
+      return { x, y, s, n: label(this, x, y + 44, r.n, 0xffffff).setDepth(20) };
     });
     this.ma = this.add.rectangle(0, 0, 78, 78, 0, 0).setStrokeStyle(2, 0xff2a2a).setDepth(6);
     this.mb = this.add.rectangle(0, 0, 78, 78, 0, 0).setStrokeStyle(2, 0xffffff).setDepth(6);
@@ -3285,8 +3290,8 @@ class VersusScene extends Phaser.Scene {
       this.mb,
       this.ga,
       this.gb,
-      label(this, 92, 342, 'JUGADOR 1', 0xff2a2a, 2),
-      label(this, SCREEN_W - 92, 342, this.P ? 'PC' : 'JUGADOR 2', 0xffffff, 2),
+      label(this, 92, 342, 'JUGADOR 1', 0xff3333, 2).setDepth(20),
+      label(this, SCREEN_W - 92, 342, this.P ? 'PC' : 'JUGADOR 2', 0xffffff, 2).setDepth(20),
     ];
   }
 
@@ -3336,6 +3341,10 @@ class VersusScene extends Phaser.Scene {
     f.hp = 3;
     f.fc = s === 1 ? 1 : -1;
     f.human = s === 1 || !this.P;
+    f.ax = f.fc;
+    f.ay = 0;
+    f.aa = f.fc > 0 ? 0 : PI;
+    f.am = false;
     f.aiX = 0;
     f.aiJ = false;
     f.aiA = false;
@@ -3350,7 +3359,6 @@ class VersusScene extends Phaser.Scene {
     f.jp = NEVER;
     f.lg = NEVER;
     f.tool = null;
-    f.iv = [];
     f.onGround = false;
     f.hl = image(this, x, 27 * T, 'tool_flashlight', 11).setVisible(false);
     f.co = image(this, x, 27 * T, 'cone', 45, 0, 0.5).setBlendMode(1).setVisible(false);
@@ -3411,60 +3419,50 @@ class VersusScene extends Phaser.Scene {
 
   pk(f, it) {
     if (!it.active || this.O) return;
-    if (!f.iv.includes(it.tc)) f.iv.push(it.tc);
     f.tool = it.tc;
     sound('pickup');
     it.destroy();
   }
 
-  cy(f, d) {
-    if (!f.iv.length) return;
-    const i = f.iv.indexOf(f.tool);
-    f.tool = f.iv[(i + d + f.iv.length) % f.iv.length];
-    sound('poke');
-  }
-
   dr(f, dir) {
     const t = f.tool;
-    f.iv = f.iv.filter((x) => x !== t);
-    f.tool = f.iv[0] || null;
+    f.tool = null;
     this.st(t, f.x, f.y - 16, -dir * between(40, 90), -200);
   }
 
   lt(f, foe, t) {
-    const dir = f.fc;
-    f.co.setVisible(true).setPosition(f.x + dir * 10, f.y - 12).setRotation(dir > 0 ? 0 : PI);
+    const a = f.aa;
+    f.co.setVisible(true).setPosition(f.x + cos(a) * 10, f.y - 12 + sin(a) * 10).setRotation(a);
     if (foe && !this.O && foe.cfg.k === 'shade' && t > f.ac) {
       const dx = foe.x - f.x;
       const dy = (foe.y - 12) - (f.y - 12);
-      if (hypot(dx, dy) < 190 && abs(Phaser.Math.Angle.Wrap(atan2(dy, dx) - (dir > 0 ? 0 : PI))) < 0.42) {
+      if (hypot(dx, dy) < 190 && abs(Phaser.Math.Angle.Wrap(atan2(dy, dx) - a)) < 0.42) {
         f.ac = t + 700;
-        this.hi(f, foe, dir);
+        this.hi(f, foe, f.ax || f.fc);
       }
     }
   }
 
   at(f, foe, t) {
     const w = f.tool;
-    const dir = f.fc;
+    const a = f.aa;
     f.ac = t + (w === 'revolver' ? 520 : w === 'crowbar' ? 420 : 360);
     if (w === 'revolver') {
       sound('shot');
       this.c.shake(60, 0.005);
-      const x0 = f.x + dir * 14;
-      const y0 = f.y - 12;
-      const ln = new Phaser.Geom.Line(x0, y0, x0 + dir * 300, y0);
+      const x0 = f.x + cos(a) * 14;
+      const y0 = f.y - 12 + sin(a) * 14;
+      const ln = new Phaser.Geom.Line(x0, y0, x0 + cos(a) * 420, y0 + sin(a) * 420);
       const tr = this.add.graphics().setDepth(30).lineStyle(1, 0xffffff, 0.9).strokeLineShape(ln);
       later(this, 50, () => tr.destroy());
-      if (foe && !this.O && Phaser.Geom.Intersects.LineToRectangle(ln, foe.getBounds())) this.hi(f, foe, dir);
+      if (foe && !this.O && Phaser.Geom.Intersects.LineToRectangle(ln, foe.getBounds())) this.hi(f, foe, sign(cos(a)) || f.fc);
       return;
     }
     sound(w === 'crowbar' ? 'swing' : 'poke');
-    const r = w === 'crowbar' ? 40 : w === 'umbrella' ? 36 : 30;
-    const box = new Phaser.Geom.Rectangle(dir > 0 ? f.x + 4 : f.x - 4 - r, f.y - 24, r, 24);
-    const sw = this.add.rectangle(box.centerX, box.centerY, r, 4, 0xffffff, 0.55).setDepth(30).setRotation(dir > 0 ? 0.25 : -0.25);
+    const box = w === 'crowbar' ? aimBox(f.x, f.y, f.ax, f.ay, 30, 46) : w === 'umbrella' ? aimBox(f.x, f.y, f.ax, f.ay, 26, 16) : aimBox(f.x, f.y, f.ax, f.ay, 24, 18);
+    const sw = this.add.rectangle(box.centerX, box.centerY, box.width, 3, 0xffffff, 0.55).setDepth(30).setRotation(a);
     later(this, 160, () => sw.destroy());
-    if (foe && !this.O && Phaser.Geom.Intersects.RectangleToRectangle(box, foe.getBounds())) this.hi(f, foe, dir);
+    if (foe && !this.O && Phaser.Geom.Intersects.RectangleToRectangle(box, foe.getBounds())) this.hi(f, foe, f.ax || f.fc);
   }
 
   hi(a, v, dir) {
@@ -3507,26 +3505,46 @@ class VersusScene extends Phaser.Scene {
       jump = p ? 'P1_2' : 'P2_2';
       use = p ? 'P1_1' : 'P2_1';
       ix = (down(p ? 'P1_R' : 'P2_R') ? 1 : 0) - (down(p ? 'P1_L' : 'P2_L') ? 1 : 0);
+      const vy = (down(p ? 'P1_D' : 'P2_D') ? 1 : 0) - (down(p ? 'P1_U' : 'P2_U') ? 1 : 0);
       ij = tap(jump);
       ia = tap(use);
+      f.am = down(use);
+      if (f.am) {
+        if (ix || vy) {
+          const a = aim8(ix, vy);
+          f.aa = a[0];
+          f.ax = a[1];
+          f.ay = a[2];
+          if (f.ax) f.fc = f.ax;
+        }
+      } else {
+        f.aa = f.fc > 0 ? 0 : PI;
+        f.ax = f.fc;
+        f.ay = 0;
+      }
       if (tap(p ? 'P1_3' : 'P2_3') && t > f.su + 400) {
         f.su = t + 160;
         f.stun = t + 160;
         f.setVelocityX(f.fc * 420);
       }
-      if (tap(p ? 'P1_5' : 'P2_5')) this.cy(f, -1);
-      if (tap(p ? 'P1_6' : 'P2_6')) this.cy(f, 1);
     } else {
       versusAI(f, foe, dt, t);
       ix = f.aiX;
       ij = f.aiJ;
       ia = f.aiA;
+      const a = atan2(foe.y - 12 - (f.y - 12), foe.x - f.x);
+      f.aa = a;
+      f.ax = round(cos(a));
+      f.ay = round(sin(a));
+      f.am = false;
+      if (f.ax) f.fc = f.ax;
     }
     if (ij) f.jp = t;
     if (t >= f.stun) {
-      if (ix) {
-        f.setVelocityX(ix * f.cfg.sp);
-        f.fc = ix;
+      const dir = f.am ? 0 : ix;
+      if (dir) {
+        f.setVelocityX(dir * f.cfg.sp);
+        f.fc = dir;
       } else f.setVelocityX(0);
       if (t - f.jp < 120 && t - f.lg < 110) {
         f.setVelocityY(-f.cfg.jp);
@@ -3535,9 +3553,9 @@ class VersusScene extends Phaser.Scene {
       }
     }
     if (jump && untap(jump) && b.velocity.y < 0) f.setVelocityY(b.velocity.y * 0.45);
-    if (f.tool === 'umbrella' && jump && !g && down(jump) && b.velocity.y > 0) f.setVelocityY(min(b.velocity.y, 36));
+    if (f.tool === 'umbrella' && jump && !g && down(jump) && b.velocity.y > 0) f.setVelocityY(min(b.velocity.y, GLIDE_FALL));
     if (f.tool === 'flashlight') {
-      if (f.human ? down(use) : ia) this.lt(f, foe, t);
+      if (f.human ? f.am : ia) this.lt(f, foe, t);
     } else if (ia && t > f.ac && t > f.stun) this.at(f, foe, t);
     const A = VANIM[f.cfg.k];
     const run = g && abs(b.velocity.x) > 5;
@@ -3551,7 +3569,14 @@ class VersusScene extends Phaser.Scene {
     }
     f.setFlipX(f.fc < 0);
     f.setAlpha(t < f.iu && floor(t / 70) % 2 ? 0.35 : 1);
-    f.hl.setVisible(!!f.tool).setTexture(f.tool ? 'tool_' + f.tool : 'tool_flashlight').setPosition(f.x + f.fc * 8, f.y - 12).setFlipX(f.fc < 0);
+    const h = TOOL_HOLD[f.tool] || [8, 11, 0.6];
+    f.hl
+      .setVisible(!!f.tool)
+      .setTexture(f.tool ? 'tool_' + f.tool : 'tool_flashlight')
+      .setFlipX(!f.am && f.fc < 0)
+      .setPosition(f.x + f.ax * h[0], f.y - h[1] + f.ay * h[0])
+      .setScale(h[2])
+      .setRotation(f.am ? f.aa : f.fc * 0.5);
     if (f.ey) f.ey.setPosition(f.x + (f.fc < 0 ? -2 : 2), f.y - (f.cfg.k === 'silbon' ? 42 : 27)).setFlipX(f.fc < 0);
   }
 
@@ -3581,8 +3606,8 @@ class VersusScene extends Phaser.Scene {
       this.add.rectangle(320, 290, 440, 240, 0x0e1320, 0.82).setStrokeStyle(1, 0x2b3648).setDepth(1),
       label(this, 320, 205, a ? '¡GANO ' + who + '!' : 'PAUSA', a ? 0xff1a1a : 0xffffff, 3).setDepth(20),
       label(this, 320, 285, 'REVANCHA', 0xffffff, 2).setDepth(20),
-      label(this, 320, 325, 'ELEGIR PERSONAJES', 0x8c8c8c, 2).setDepth(20),
-      label(this, 320, 365, 'VOLVER AL INICIO', 0x8c8c8c, 2).setDepth(20),
+      label(this, 320, 325, 'ELEGIR PERSONAJES', 0xb8b8b8, 2).setDepth(20),
+      label(this, 320, 365, 'VOLVER AL INICIO', 0xb8b8b8, 2).setDepth(20),
     ];
     this.l = [this.U[2], this.U[3], this.U[4]];
   }
@@ -3603,7 +3628,7 @@ class VersusScene extends Phaser.Scene {
       else this.cs();
       return;
     }
-    this.l.forEach((t, i) => t.setTint(i === this.I ? 0xffffff : 0x8c8c8c));
+    this.l.forEach((t, i) => t.setTint(i === this.I ? 0xffffff : 0xb8b8b8));
   }
 
   update(t, dt) {
