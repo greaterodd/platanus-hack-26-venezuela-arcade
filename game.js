@@ -1534,7 +1534,7 @@ function makeFx(scene) {
 // (the top of the ground under it), so its feet are at y * 16.
 
 const T = 16;
-const OX = 56; // tiles of intro forest prepended before the old world
+const OX = 96; // tiles of intro forest prepended before the old world
 const BASE_W = 192; // width of the world before the forest was prepended
 const W = BASE_W + OX;
 const ARENA_X = 150; // first column of the ruins where El Silbon is fought
@@ -1707,28 +1707,20 @@ function buildWorld() {
   // Intro forest: the child leaves the house and walks east toward the llanos.
   const pi = ents.findIndex((o) => o.type === 'player');
   if (pi >= 0) ents.splice(pi, 1);
-  fill(2, 26, 57, 37); // forest floor
+  // A thin crust of earth over blackness: the woods are only trunks and fog.
+  for (let y = 28; y < H; y++) for (let x = 0; x < OX + 2; x++) grid[y][x] = EMPTY;
+  fill(2, 26, OX + 1, 27); // forest floor
   e('player', 9, 26);
   e('house', 6, 26);
   e('shrine', 12, 26, { lit: true });
   e('fence', 15, 26);
   e('fence', 17, 26);
-  e('tree', 20, 26, { scale: 1.1 });
-  e('tree', 25, 26, { flip: true });
-  e('tree', 30, 26, { scale: 1.25 });
-  e('tree', 35, 26, { flip: true, scale: 0.95 });
-  e('tree', 41, 26, { scale: 1.15 });
-  e('tree', 46, 26, { flip: true });
-  e('tree', 51, 26, { scale: 1.2 });
-  e('tree', 56, 26, { flip: true });
-  e('scrub', 22, 26);
-  e('scrub', 33, 26);
-  e('scrub', 44, 26);
-  e('scrub', 54, 26);
-  e('foresteyes', 19, 24);
-  e('foresteyes', 28, 25);
-  e('foresteyes', 38, 23);
-  e('foresteyes', 49, 24);
+  for (let i = 0; i < 13; i++) {
+    const x = 21 + i * 6;
+    e('tree', x, 26, { flip: i % 3 === 1, scale: 1.3 + (i % 4) * 0.35 });
+  }
+  for (let x = 24; x <= OX - 2; x += 9) e('scrub', x, 26);
+  for (const x of [19, 30, 42, 54, 66, 78, 90]) e('foresteyes', x, 23 + (x % 4));
 
   return { grid, interior, ents };
 }
@@ -3107,17 +3099,17 @@ class GameScene extends Phaser.Scene {
       }
     }
 
-    if (p.x > 83 * T && p.x < 90 * T) this.hint('veil', 'Un velo de sombra viva. Alumbralo con la linterna.');
-    if (p.x > 140 * T && p.x < 146 * T && p.y < 12 * T && !this.found.has('umbrella')) {
+    if (p.x > (27 + OX) * T && p.x < (34 + OX) * T) this.hint('veil', 'Un velo de sombra viva. Alumbralo con la linterna.');
+    if (p.x > (84 + OX) * T && p.x < (90 + OX) * T && p.y < 12 * T && !this.found.has('umbrella')) {
       this.hint('chasm', 'Muy lejos para saltar... si tan solo algo frenara la caida.', 4000);
     }
-    if (this.found.has('crowbar') && p.x > 96 * T && p.x < 104 * T && p.y > 20 * T && p.y < 27 * T && this.cracked.has('101,26')) {
+    if (this.found.has('crowbar') && p.x > (40 + OX) * T && p.x < (48 + OX) * T && p.y > 20 * T && p.y < 27 * T && this.cracked.has(`${45 + OX},26`)) {
       this.hint('floor', 'El piso aqui esta agrietado...');
     }
-    if (grounded && p.x > 141 * T && p.x < 144 * T && p.y > 26 * T && p.y < 28 * T) {
+    if (grounded && p.x > (85 + OX) * T && p.x < (88 + OX) * T && p.y > 26 * T && p.y < 28 * T) {
       this.hint('beam', 'Vigas de madera... pulsa ABAJO dos veces para bajar.');
     }
-    if (p.x < 186 * T && p.x > 166 * T && p.y < 9 * T) this.hint('bell', 'La gran campana. Hazla sonar.');
+    if (p.x < (130 + OX) * T && p.x > (110 + OX) * T && p.y < 9 * T) this.hint('bell', 'La gran campana. Hazla sonar.');
     if (this.aiming) this.hint('freeaim', 'APUNTADO LIBRE - manten BOTON 2 y apunta con el joystick.', 3000);
 
     // Free-aim reticle.
@@ -3227,13 +3219,15 @@ class GameScene extends Phaser.Scene {
   updateParallax() {
     const cam = this.cameras.main;
     // Cross-fade the woods into the open llanos as the child walks east.
-    const forest = 1 - Phaser.Math.Clamp((this.player.x - 52 * T) / (14 * T), 0, 1);
+    const forest = 1 - Phaser.Math.Clamp((this.player.x - (OX - 4) * T) / (14 * T), 0, 1);
+    // The trunks are locked to the screen and run the full height, so they read
+    // as the forest itself rather than drifting with the child.
     this.forestFar.tilePositionX = cam.scrollX * 0.18;
-    this.forestFar.y = 10 - cam.scrollY * 0.06;
+    this.forestFar.y = 0;
     this.forestMid.tilePositionX = cam.scrollX * 0.5;
-    this.forestMid.y = 18 - cam.scrollY * 0.14;
+    this.forestMid.y = 0;
     this.foreTrees.tilePositionX = cam.scrollX * 1.35;
-    this.foreTrees.y = -cam.scrollY * 0.25;
+    this.foreTrees.y = 0;
     this.forestFar.setAlpha(forest);
     this.forestMid.setAlpha(forest);
     this.foreTrees.setAlpha(forest);
@@ -3507,6 +3501,14 @@ class GameScene extends Phaser.Scene {
 
   update(time, delta) {
     const dt = Math.min(delta, 50) / 1000;
+
+    // On the flat approach the camera holds still vertically, so the woods do
+    // not lurch every time the child jumps; the cerro resumes the follow.
+    const flat = this.player.x < (OX + 34) * T;
+    if (flat !== this.flatCam) {
+      this.flatCam = flat;
+      this.cameras.main.setDeadzone(flat ? 1 : 0, flat ? 600 : 0);
+    }
 
     this.updatePlayer(dt, time);
     this.updateTools(dt, time);
