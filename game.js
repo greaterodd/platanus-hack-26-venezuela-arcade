@@ -70,7 +70,6 @@ const BTN = {
   down: ['P1_D'],
   jump: ['P1_1'],
   use: ['P1_2'],
-  aim: ['P1_3'],
   prev: ['P1_4'],
   next: ['P1_5'],
   mute: ['P1_6'],
@@ -2743,11 +2742,11 @@ class GameScene extends Phaser.Scene {
     const dn = down(...BTN.down);
     const grounded = p.body.blocked.down;
 
-    // Free aim: hold BUTTON 3 (O) and steer with the stick. The stick drives the
-    // reticle instead of movement, so the child plants their feet while aiming.
+    // Free aim / focus: hold BUTTON 2 and steer with the stick. The stick drives
+    // the reticle instead of movement, so the child plants their feet while aiming.
     const hx = (right ? 1 : 0) - (left ? 1 : 0);
     const vy = (dn ? 1 : 0) - (up ? 1 : 0);
-    this.aiming = down(...BTN.aim);
+    this.aiming = down(...BTN.use);
     if (this.aiming) {
       if (hx || vy) {
         const q = Math.round(Math.atan2(vy, hx) / (Math.PI / 4)) * (Math.PI / 4);
@@ -2840,7 +2839,7 @@ class GameScene extends Phaser.Scene {
       this.hint('beam', 'Vigas de madera... pulsa ABAJO dos veces para bajar.');
     }
     if (p.x < 130 * T && p.x > 110 * T && p.y < 9 * T) this.hint('bell', 'La gran campana. Hazla sonar.');
-    if (this.aiming) this.hint('freeaim', 'APUNTADO LIBRE - manten BOTON 3 y apunta con el joystick.', 3000);
+    if (this.aiming) this.hint('freeaim', 'APUNTADO LIBRE - manten BOTON 2 y apunta con el joystick.', 3000);
 
     // Free-aim reticle.
     const dist = 42;
