@@ -414,12 +414,22 @@ class AudioEngine {
       case 'glitch':
         this.glitchNoise(0.2);
         break;
+      case 'shot':
+        this.noiseHit(t, 0.25, 0.9, 100, 5000);
+        this.sweep('square', 300, 50, 0.2, 0.15);
+        break;
       case 'greatbell':
         this.bell(midi(38), t, 0.4, 9, this.sfx);
         this.bell(midi(38), t + 2.2, 0.3, 9, this.sfx);
         this.bell(midi(38), t + 4.4, 0.25, 9, this.sfx);
         break;
     }
+  }
+
+  // El Silbon's whistle: a rising do-re-mi-fa-sol-la-si.
+  whistle(vol, base, step = 0.32) {
+    if (!this.ctx) return;
+    [0, 2, 4, 5, 7, 9, 11].forEach((n, i) => this.tone('sine', midi(base + n), this.now + i * step, step * 1.3, vol, 4000, 0.05, true, this.sfx));
   }
 
   glitchNoise(dur) {
@@ -637,6 +647,19 @@ const ICONS = {
   ],
 };
 
+ICONS.revolver = [
+  '................',
+  '................',
+  '................',
+  '................',
+  '...4666666666...',
+  '..44555555556...',
+  '..4444444.......',
+  '..455.3.........',
+  '..445...........',
+  '.445............',
+  '.44.............',
+];
 const UMBRELLA_OPEN = [
   '..........1111111111..........',
   '.......111cccccccccc111.......',
@@ -666,6 +689,64 @@ function makeArt(scene) {
   sheet(scene, 'shade', [[...SHADE_TOP, ...SHADE_LEGS_A], [...SHADE_TOP, ...SHADE_LEGS_B]], 16, 32);
   sheet(scene, 'bat', BAT, 16, 8);
   for (const [k, rows] of Object.entries(ICONS)) sheet(scene, `tool_${k}`, [rows], 16, 16);
+
+  // El Silbon: a gaunt, too-tall man under a wide hat, a sack of bones on his back. Two walk frames.
+  fromCanvas(scene, 'silbon', 48, 56, (c) => {
+    [0, 24].forEach((ox, step) => {
+      const r = (col, x, y, w, h) => {
+        c.fillStyle = col;
+        c.fillRect(ox + x, y, w, h);
+      };
+      r('#5a5a5a', 1, 20, 5, 9); // sack
+      r('#2a2a2a', 2, 23, 1, 1);
+      r('#2a2a2a', 4, 26, 1, 1);
+      r('#2a2a2a', 8, 2, 8, 7); // hat
+      r('#5a5a5a', 8, 2, 8, 1);
+      r('#3a3a3a', 2, 9, 20, 2);
+      r('#6a6a6a', 2, 9, 20, 1);
+      r('#c9c9c9', 9, 11, 6, 6); // face
+      r('#000', 9, 11, 6, 2);
+      r('#8c8c8c', 10, 17, 4, 1);
+      r('#4a4a4a', 8, 18, 8, 16); // coat
+      r('#1c1c1c', 9, 18, 6, 16);
+      r('#2a2a2a', 6, 19, 2, 20); // arms
+      r('#2a2a2a', 16, 19, 2, 20);
+      r('#c9c9c9', 6, 39, 2, 2);
+      r('#c9c9c9', 16, 39, 2, 2);
+      r('#2a2a2a', 9 - step * 2, 34, 2, 22); // legs
+      r('#2a2a2a', 13 + step * 2, 34, 2, 22);
+      r('#5a5a5a', 8 - step * 2, 55, 4, 1);
+      r('#5a5a5a', 13 + step * 2, 55, 4, 1);
+    });
+  });
+  [0, 1].forEach((i) => scene.textures.get('silbon').add(i, 0, i * 24, 0, 24, 56));
+  // The campesino: yellow straw hat, pale shirt, rolled trousers.
+  fromCanvas(scene, 'campesino', 16, 26, (c) => {
+    const r = (col, x, y, w, h) => {
+      c.fillStyle = col;
+      c.fillRect(x, y, w, h);
+    };
+    r('#d9a520', 5, 0, 6, 3); // hat
+    r('#f2c230', 1, 3, 14, 2);
+    r('#8a6410', 5, 2, 6, 1);
+    r('#8a5a36', 5, 5, 6, 5); // face
+    r('#0c0c0c', 9, 7, 1, 1);
+    r('#2a1a10', 6, 9, 4, 1);
+    r('#b0b0b0', 4, 10, 8, 8); // shirt
+    r('#8c8c8c', 3, 11, 1, 6);
+    r('#8c8c8c', 12, 11, 1, 6);
+    r('#8a5a36', 12, 17, 1, 2);
+    r('#4a4a4a', 5, 18, 2, 7); // trousers
+    r('#4a4a4a', 9, 18, 2, 7);
+    r('#8a5a36', 5, 25, 2, 1);
+    r('#8a5a36', 9, 25, 2, 1);
+  });
+  fromCanvas(scene, 'bone', 8, 4, (c) => {
+    c.fillStyle = '#e6e6e6';
+    c.fillRect(1, 1, 6, 2);
+    c.fillRect(0, 0, 2, 4);
+    c.fillRect(6, 0, 2, 4);
+  });
   sheet(scene, 'umbrella_open', [UMBRELLA_OPEN], 30, 12);
 
   fromCanvas(scene, 'eyes', 8, 4, (c) => {
@@ -1267,7 +1348,9 @@ function makeFx(scene) {
 // (the top of the ground under it), so its feet are at y * 16.
 
 const T = 16;
-const W = 150;
+const W = 192;
+const ARENA_X = 150; // first column of the ruins where El Silbon is fought
+const ARENA_Y = 30;
 const H = 40;
 
 const EMPTY = 0;
@@ -1296,6 +1379,8 @@ function buildWorld() {
   fill(0, 0, 1, H - 1);
   fill(W - 2, 0, W - 1, H - 1);
   fill(0, H - 2, W - 1, H - 1);
+  fill(ARENA_X - 2, 0, ARENA_X - 1, H - 1); // belfry's outer wall; the ruins lie beyond it
+  fill(ARENA_X, ARENA_Y, W - 3, H - 3);
 
   // Graveyard
   fill(2, 26, 33, 37);
@@ -1640,6 +1725,7 @@ class BootScene extends Phaser.Scene {
     this.anims.create({ key: 'child-run', frames: frames('child', [1, 2, 3, 2]), frameRate: 10, repeat: -1 });
     this.anims.create({ key: 'child-jump', frames: frames('child', [4]), frameRate: 1 });
     this.anims.create({ key: 'shade-walk', frames: frames('shade', [0, 1]), frameRate: 3, repeat: -1 });
+    this.anims.create({ key: 'silbon-walk', frames: frames('silbon', [0, 1]), frameRate: 4, repeat: -1 });
     this.anims.create({ key: 'bat-fly', frames: frames('bat', [0, 1]), frameRate: 10, repeat: -1 });
     this.anims.create({ key: 'flame', frames: frames('flame', [0, 1]), frameRate: 7, repeat: -1 });
 
@@ -1695,7 +1781,7 @@ class TitleScene extends Phaser.Scene {
           img(x, y - 30, 'umbrella_open');
         },
       ],
-      ['CAMBIAR', 'BTN 3 / 4', (x, y) => TOOLS.forEach((t, i) => img(x + (i - 1) * 30, y + 6, `tool_${t}`))],
+      ['CAMBIAR', 'BTN 3 / 4', (x, y) => TOOLS.slice(0, 3).forEach((t, i) => img(x + (i - 1) * 30, y + 6, `tool_${t}`))],
       [
         'APUNTAR',
         'BTN 6 Y JOYSTICK',
@@ -1753,8 +1839,9 @@ const MAX_HEARTS = 3;
 const DROP_TIME = 5000; // how long a dropped tool waits on the ground
 const BASE_DARK = 0.8;
 const HUD_LINGER = 4000; // ms the HUD stays up after a tool change or a hit
-const TOOLS = ['flashlight', 'crowbar', 'umbrella'];
-const TOOL_NAMES = { flashlight: 'LINTERNA', crowbar: 'PATA DE CABRA', umbrella: 'PARAGUAS' };
+const TOOLS = ['flashlight', 'crowbar', 'umbrella', 'revolver'];
+const BOSS_HP = 8;
+const TOOL_NAMES = { flashlight: 'LINTERNA', crowbar: 'PATA DE CABRA', umbrella: 'PARAGUAS', revolver: 'REVOLVER' };
 
 class GameScene extends Phaser.Scene {
   constructor() {
@@ -1809,6 +1896,16 @@ class GameScene extends Phaser.Scene {
     cam.setBounds(0, 0, W * T, H * T);
     cam.startFollow(this.player, true, 0.12, 0.12, 0, 30);
 
+    this.cut = false; // cutscene: the child stands frozen
+    this.boss = null;
+    this.silbon = null;
+    this.ruinBell = null;
+    this.thrown = false; // the revolver has been thrown in
+    // The legend: when the whistle sounds close, El Silbon is far away.
+    this.time.delayedCall(5200, () => {
+      audio.whistle(0.14, 76);
+      this.hint('whistle', 'Un silbido... dicen que si suena cerca, el esta lejos.', 4500);
+    });
     this.time.delayedCall(900, () => this.hint('start', 'JOYSTICK mover - BOTON 2 saltar - tu LINTERNA quema lo que acecha'));
   }
 
@@ -2202,6 +2299,7 @@ class GameScene extends Phaser.Scene {
       this.glitch.hit(0.4);
       if (tool === 'crowbar') this.message('PATA DE CABRA - pulsa BOTON 1 para golpear. La piedra agrietada cede.', 5000);
       if (tool === 'umbrella') this.message('PARAGUAS - manten BOTON 2 al caer para planear.', 5000);
+      if (tool === 'revolver') this.hearts = MAX_HEARTS;
     } else {
       audio.play('pickup');
       this.message(`Recuperaste: ${TOOL_NAMES[tool]}.`, 1800);
@@ -2281,6 +2379,24 @@ class GameScene extends Phaser.Scene {
           this.swingUntil = time + 180;
           audio.play('swing');
           this.strike(this.aimBox(2, 30, 46), 2, 220, true);
+        }
+        break;
+      }
+      case 'revolver': {
+        const kick = swingT > 0 ? -0.6 * swingT : 0;
+        this.held.setPosition(p.x + ax * 9, p.y - 11 + ay * 9).setScale(0.8).setRotation(this.aiming ? aimAng + kick : f * kick);
+        if (useDown && this.attackCooldown <= 0) {
+          this.attackCooldown = 0.45;
+          this.swingUntil = time + 180;
+          audio.play('shot');
+          this.cameras.main.shake(70, 0.006);
+          const x0 = p.x + ax * 14;
+          const y0 = p.y - 12 + ay * 14;
+          const shot = new Phaser.Geom.Line(x0, y0, x0 + Math.cos(aimAng) * 420, y0 + Math.sin(aimAng) * 420);
+          const tracer = this.add.graphics().setDepth(61).lineStyle(1, 0xffffff, 0.9).strokeLineShape(shot);
+          this.time.delayedCall(50, () => tracer.destroy());
+          const b = this.boss;
+          if (b && !b.dying && Phaser.Geom.Intersects.LineToRectangle(shot, b.getBounds())) this.hitBoss(Math.sign(b.x - p.x));
         }
         break;
       }
@@ -2557,7 +2673,7 @@ class GameScene extends Phaser.Scene {
   // Returns false if the hit was ignored.
   hurt(srcX) {
     const time = this.time.now;
-    if (this.dead || this.won || time < this.invulnUntil) return false;
+    if (this.dead || this.won || this.cut || time < this.invulnUntil) return false;
     const p = this.player;
     this.invulnUntil = time + 1400;
     this.stunUntil = time + 260;
@@ -2569,11 +2685,13 @@ class GameScene extends Phaser.Scene {
     this.cameras.main.shake(160, 0.012);
     if (this.hud) this.hud.pulse();
 
-    if (this.equipped) {
+    // El Silbon goes straight for the heart; lesser things only knock the tool away.
+    if (this.equipped && !this.boss) {
       this.dropTool(dir);
     } else {
       this.hearts--;
       if (this.hearts <= 0) this.die();
+      else if (this.boss && this.hearts === 1 && !this.found.has('revolver') && !this.thrown) this.throwRevolver();
     }
     return true;
   }
@@ -2594,6 +2712,7 @@ class GameScene extends Phaser.Scene {
       this.dead = false;
       p.setVisible(true);
       p.body.enable = true;
+      if (this.boss) this.leaveArena();
       this.respawnAtCheckpoint();
     });
   }
@@ -2610,7 +2729,7 @@ class GameScene extends Phaser.Scene {
 
   updatePlayer(dt, time) {
     const p = this.player;
-    if (this.dead || this.won) {
+    if (this.dead || this.won || this.cut) {
       if (!this.dead) p.setVelocityX(0);
       this.aiming = false;
       this.reticle.setVisible(false);
@@ -2735,7 +2854,7 @@ class GameScene extends Phaser.Scene {
       .setRotation(this.aimAngle)
       .setAlpha(0.55 + 0.35 * Math.sin(time / 110));
 
-    if (this.bellZone && !this.won && this.bellZone.contains(p.x, p.y - 10)) this.win();
+    if (!this.boss && !this.cut && this.bellZone.contains(p.x, p.y - 10)) this.silbonIntro();
   }
 
   updatePickups(time) {
@@ -2778,7 +2897,7 @@ class GameScene extends Phaser.Scene {
     const sx = cam.scrollX;
     const sy = cam.scrollY;
     const dark = this.dark;
-    const alpha = Math.max(0.32, BASE_DARK * (1 - 0.93 * Math.min(1, this.storm.flash * 1.4)));
+    const alpha = Math.max(0.32, BASE_DARK * (this.boss ? 0.6 : 1) * (1 - 0.93 * Math.min(1, this.storm.flash * 1.4)));
     const onScreen = (x, y, r) => x + r > sx && x - r < sx + cam.width && y + r > sy && y - r < sy + cam.height;
     const light = (x, y, r, a = 1) => {
       if (!onScreen(x, y, r)) return;
@@ -2839,6 +2958,234 @@ class GameScene extends Phaser.Scene {
     this.buttress.y = 21 - cam.scrollY * 0.15;
   }
 
+  // He was behind you the whole time. The far-off whistle, the castle coming down, then the ruins.
+  silbonIntro() {
+    const p = this.player;
+    const cam = this.cameras.main;
+    const { width, height } = this.scale;
+    this.cut = true;
+    audio.stopMusic();
+    audio.whistle(0.03, 48, 0.4);
+    this.message('Un silbido lejano, muy lejano... el esta aqui.', 4000);
+
+    const side = p.x > this.bell.x ? -1 : 1;
+    const ghost = this.add.image(p.x + side * 70, 9 * T, 'silbon', 0).setOrigin(0.5, 1).setDepth(12).setFlipX(side > 0).setAlpha(0);
+    const eyes = this.add.image(ghost.x - side * 2, ghost.y - 42.5, 'eyes').setDepth(60).setAlpha(0);
+    const white = this.add.rectangle(0, 0, width, height, 0xffffff).setOrigin(0).setScrollFactor(0).setDepth(200).setAlpha(0);
+    this.tweens.add({ targets: [ghost, eyes], alpha: 1, delay: 3000, duration: 900 });
+    this.time.delayedCall(3000, () => this.glitch.hit(0.8));
+
+    this.time.delayedCall(4600, () => {
+      cam.shake(2200, 0.02);
+      this.tweens.add({ targets: white, alpha: 1, delay: 700, duration: 1400 });
+      [0, 500, 1000, 1500].forEach((d) =>
+        this.time.delayedCall(d, () => {
+          audio.play('crumble');
+          this.storm.strike(1);
+          for (let i = 0; i < 12; i++) this.debrisFx.emitParticleAt(cam.scrollX + Math.random() * width, cam.scrollY + Math.random() * height, 6);
+        }),
+      );
+    });
+
+    this.time.delayedCall(7000, () => {
+      ghost.destroy();
+      eyes.destroy();
+      this.startArena();
+      this.tweens.add({ targets: white, alpha: 0, duration: 1200, onComplete: () => white.destroy() });
+    });
+  }
+
+  // The castle is gone: flat rubble under open sky, and El Silbon.
+  startArena() {
+    const p = this.player;
+    const x0 = ARENA_X * T;
+    const gy = ARENA_Y * T;
+    const cam = this.cameras.main;
+    this.spires.setVisible(false);
+    this.buttress.setVisible(false);
+    cam.setBounds(x0, 0, (W - 2 - ARENA_X) * T, H * T);
+    this.belfryBell = this.bell;
+    if (!this.ruinBell) {
+      for (const [x, h, a] of [[70, 40, -8], [250, 70, 5], [400, 28, 12], [560, 56, -4]]) {
+        this.add.tileSprite(x0 + x, gy + 4, 20, h, 'pillar').setOrigin(0.5, 1).setDepth(-8).setAngle(a);
+      }
+      this.ruinBell = this.add.image(x0 + 480, gy + 6, 'bell').setOrigin(0.5, 1).setDepth(-6);
+    }
+    this.bell = this.ruinBell;
+
+    this.checkpoint = { x: x0 + 110, y: gy };
+    this.hearts = MAX_HEARTS;
+    this.respawnAtCheckpoint();
+    this.facing = 1;
+
+    // Built once; a lost fight hides him and the next visit to the bell brings him back.
+    if (!this.silbon) {
+      const s = (this.silbon = this.physics.add.sprite(0, 0, 'silbon', 0));
+      s.setOrigin(0.5, 1).setDepth(12).setCollideWorldBounds(true).play('silbon-walk');
+      s.body.setSize(10, 42).setOffset(7, 14);
+      s.eyes = this.add.image(0, 0, 'eyes').setDepth(60);
+      this.bones = this.physics.add.group();
+      this.physics.add.collider(s, this.layer);
+      this.physics.add.collider(this.bones, this.layer, (bone) => bone.destroy());
+      this.physics.add.overlap(p, s, () => !s.dying && this.hurt(s.x));
+      this.physics.add.overlap(p, this.bones, (_, bone) => {
+        if (this.hurt(bone.x)) bone.destroy();
+      });
+    }
+    const b = (this.boss = this.silbon);
+    b.setPosition(x0 + 520, gy - 1).setVelocity(0, 0).setVisible(true);
+    b.eyes.setVisible(true);
+    b.body.enable = true;
+    b.hp = BOSS_HP;
+    b.state = 'walk';
+    b.nextAt = this.time.now + 3500;
+
+    if (this.hud) {
+      this.hud.big('EL SILBON');
+      this.time.delayedCall(2200, () => this.hud.clearBig());
+    }
+    this.time.delayedCall(1800, () => {
+      this.cut = false;
+      audio.startMusic();
+    });
+  }
+
+  // He won: the castle stands again and the child wakes a few steps short of the bell.
+  leaveArena() {
+    const b = this.boss;
+    this.boss = null;
+    this.thrown = false;
+    b.setVisible(false);
+    b.eyes.setVisible(false);
+    b.body.enable = false;
+    this.bones.clear(true, true);
+    for (const i of this.pickups.getChildren().slice()) if (i.tool === 'revolver') i.destroy();
+    this.inventory.delete('revolver');
+    this.found.delete('revolver');
+    if (this.equipped === 'revolver') this.equipped = TOOLS.find((t) => this.inventory.has(t)) || null;
+    this.bell = this.belfryBell;
+    this.spires.setVisible(true);
+    this.buttress.setVisible(true);
+    this.cameras.main.setBounds(0, 0, W * T, H * T);
+    this.checkpoint = { x: 137 * T, y: 9 * T };
+    audio.whistle(0.14, 76);
+  }
+
+  // Walks you down, then either lunges or scatters bones from his sack.
+  updateBoss(time) {
+    const b = this.boss;
+    if (!b || b.dying) return;
+    const p = this.player;
+    const dx = p.x - b.x;
+    const dir = Math.sign(dx) || 1;
+    const rage = b.hp <= BOSS_HP / 2;
+    if (this.cut || this.dead) {
+      b.setVelocityX(0);
+    } else if (b.state === 'walk') {
+      b.setVelocityX(dir * (rage ? 78 : 52));
+      b.setFlipX(dir < 0);
+      if (time > b.nextAt) {
+        b.state = 'tell';
+        b.lunge = Math.abs(dx) < 150 && Math.random() < 0.6;
+        b.until = time + (rage ? 420 : 600);
+        b.setVelocityX(0);
+        audio.sweep('sine', 520, b.lunge ? 1040 : 780, 0.35, 0.09);
+      }
+    } else if (b.state === 'tell') {
+      if (time > b.until) {
+        if (b.lunge) {
+          b.state = 'lunge';
+          b.until = time + 520;
+          b.setVelocityX(dir * 290);
+        } else {
+          for (let i = 0; i < (rage ? 4 : 3); i++) {
+            const bone = this.bones.create(b.x, b.y - 40, 'bone').setDepth(13).setScale(1.5);
+            bone.setVelocity((Phaser.Math.Clamp(dx, -300, 300) / 0.8) * (0.6 + i * 0.3), -280 - i * 25).setAngularVelocity(500);
+          }
+          audio.play('swing');
+          b.state = 'walk';
+          b.nextAt = time + (rage ? 1300 : 1900);
+        }
+      }
+    } else if (time > b.until) {
+      b.state = 'walk';
+      b.nextAt = time + (rage ? 1100 : 1600);
+    }
+    b.anims.timeScale = b.state === 'walk' ? (rage ? 2 : 1) : 0;
+    const tell = b.state === 'tell' && Math.floor(time / 60) % 2;
+    b.eyes.setPosition(b.x + (b.flipX ? -2 : 2), b.y - 42.5).setScale(tell ? 2 : 1);
+  }
+
+  // A campesino steps out of the rubble: everything stops while he speaks and throws the gun.
+  throwRevolver() {
+    this.thrown = true;
+    this.cut = true;
+    this.bones.clear(true, true);
+    const p = this.player;
+    const x0 = ARENA_X * T;
+    const gy = ARENA_Y * T;
+    const side = p.x > x0 + 320 ? -1 : 1;
+    const x = Phaser.Math.Clamp(p.x + side * 130, x0 + 30, x0 + 610);
+    const who = this.add.image(x, gy, 'campesino').setOrigin(0.5, 1).setScale(2).setDepth(9).setFlipX(side > 0).setAlpha(0);
+    const lamp = { x, y: gy - 30, r: 80, flicker: true };
+    this.lights.push(lamp);
+    const tx = Phaser.Math.Clamp(x, x0 + 170, x0 + 470);
+    const say = [
+      this.add.rectangle(tx, gy - 76, 328, 16, 0, 0.85).setDepth(61),
+      label(this, tx, gy - 76, 'EL SIEMPRE SE APARECE POR AQUI, MUCHACHO').setDepth(62),
+    ];
+    this.glitch.hit(0.5);
+    audio.play('checkpoint');
+    this.tweens.add({ targets: who, alpha: 1, duration: 300 });
+
+    this.time.delayedCall(1700, () => {
+      say[1].setText('¡TOMA! ¡DISPARALE!');
+      audio.play('swing');
+      this.spawnPickup('revolver', x - side * 12, gy - 40, -side * 150, -300, null);
+    });
+    this.time.delayedCall(2700, () => {
+      this.cut = false;
+      this.invulnUntil = this.time.now + 2500;
+      this.message('¡Un revolver! Agarralo y dispara con BOTON 1.', 5000);
+    });
+    this.tweens.add({
+      targets: [who, ...say],
+      alpha: 0,
+      delay: 5000,
+      duration: 1000,
+      onComplete: () => {
+        this.lights.splice(this.lights.indexOf(lamp), 1);
+        who.destroy();
+        say.forEach((o) => o.destroy());
+      },
+    });
+  }
+
+  hitBoss(dir) {
+    const b = this.boss;
+    b.hp--;
+    this.bleed(b.x, b.y - 30, 18, 2);
+    audio.play('flesh');
+    b.setTint(0xff4444);
+    this.time.delayedCall(120, () => b.clearTint());
+    if (b.state !== 'lunge') b.setVelocity(dir * 120, -90);
+    if (this.hud) this.hud.pulse();
+    if (b.hp > 0) return;
+
+    b.dying = true;
+    b.body.enable = false;
+    b.anims.stop();
+    this.bones.clear(true, true);
+    this.bleed(b.x, b.y - 28, 90, 6);
+    audio.play('die');
+    [83, 79, 76, 72, 67, 60, 48].forEach((n, i) => audio.tone('sine', midi(n), audio.now + i * 0.22, 0.3, 0.1, 4000, 0.03, true, audio.sfx));
+    this.glitch.hit(1);
+    this.cameras.main.shake(500, 0.015);
+    this.tweens.add({ targets: [b, b.eyes], alpha: 0, duration: 1600 });
+    this.tweens.add({ targets: b, scaleY: 0.1, duration: 1600 });
+    this.time.delayedCall(2400, () => this.win());
+  }
+
   win() {
     this.won = true;
     this.player.setVelocity(0, 0);
@@ -2872,6 +3219,7 @@ class GameScene extends Phaser.Scene {
     this.updateTools(dt, time);
     for (const s of this.shades.getChildren().slice()) this.updateShade(s, dt, time);
     for (const b of this.bats.getChildren().slice()) this.updateBat(b, dt, time);
+    this.updateBoss(time);
     for (const v of this.veils) {
       v.tilePositionY -= dt * 20;
       v.tilePositionX = Math.sin(time / 300) * 3;
@@ -2911,14 +3259,17 @@ class HudScene extends Phaser.Scene {
       this.heartIcons.push(this.add.image(14 + i * 18, 14, 'heart', 0).setScale(2));
     }
     this.slotGfx = this.add.graphics();
-    this.slotIcons = TOOLS.map((t, i) => this.add.image(width - 86 + i * 28, 16, `tool_${t}`));
-    this.slotUnknown = TOOLS.map((_, i) => label(this, width - 86 + i * 28, 16, '?', 0x8a8a8a));
+    this.slotIcons = TOOLS.map((t, i) => this.add.image(width - 114 + i * 28, 16, `tool_${t}`));
+    this.slotUnknown = TOOLS.map((_, i) => label(this, width - 114 + i * 28, 16, '?', 0x8a8a8a));
+    this.bossHearts = [];
+    for (let i = 0; i < BOSS_HP; i++) this.bossHearts.push(this.add.image(width / 2 - 63 + i * 18, 14, 'heart', 0).setScale(2));
     this.toolLabel = label(this, width - 12, 34, '').setOrigin(1, 0);
     this.panel = this.add.container(0, 0, [
       ...this.heartIcons,
       this.slotGfx,
       ...this.slotIcons,
       ...this.slotUnknown,
+      ...this.bossHearts,
       this.toolLabel,
     ]);
     this.msgBg = this.add.rectangle(0, height - 32, width, 20, 0, 0.8).setOrigin(0).setAlpha(0);
@@ -2953,9 +3304,18 @@ class HudScene extends Phaser.Scene {
     const { width } = this.scale;
     const gr = this.slotGfx.clear();
     const dropped = new Set(g.pickups.getChildren().filter((i) => i.expires).map((i) => i.tool));
+    const b = g.boss && !g.boss.dying ? g.boss : null;
+    if (b) this.pulse();
+    this.bossHearts.forEach((h, i) => h.setVisible(!!b).setFrame(b && i < b.hp ? 0 : 1));
     TOOLS.forEach((t, i) => {
-      const x = width - 86 + i * 28;
+      const x = width - 114 + i * 28;
       const eq = g.equipped === t;
+      // The revolver's slot stays hidden until it is thrown to you.
+      if (i > 2 && !g.found.has(t)) {
+        this.slotUnknown[i].setVisible(false);
+        this.slotIcons[i].setVisible(false);
+        return;
+      }
       gr.fillStyle(0x0a0d12, 0.92).fillRect(x - 12, 4, 24, 24);
       gr.lineStyle(eq ? 2 : 1, eq ? 0xff2a2a : 0xc8d0d8, 1).strokeRect(x - 12, 4, 24, 24);
       const has = g.inventory.has(t);
