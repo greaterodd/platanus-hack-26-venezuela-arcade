@@ -70,9 +70,9 @@ const B_UP = 'P1_U';
 const B_DOWN = 'P1_D';
 const B_JUMP = 'P1_1';
 const B_USE = 'P1_2';
-const B_PREV = 'P1_4';
-const B_NEXT = 'P1_5';
-const B_MUTE = 'P1_6';
+const B_PREV = 'P1_5';
+const B_NEXT = 'P1_6';
+const B_MUTE = 'P1_4';
 
 // Audio: everything is synthesised on one shared context, built on the first press.
 
@@ -1477,7 +1477,7 @@ class TitleScene extends Phaser.Scene {
           img(x, y - 30, 'umbrella_open');
         },
       ],
-      ['CAMBIAR', 'BTN 4 / 5', (x, y) => TOOLS.slice(0, 3).forEach((t, i) => img(x + (i - 1) * 30, y + 6, 'tool_' + t))],
+      ['CAMBIAR', 'BTN 5 / 6', (x, y) => TOOLS.slice(0, 3).forEach((t, i) => img(x + (i - 1) * 30, y + 6, 'tool_' + t))],
       [
         'APUNTAR',
         'BTN 2 Y JOYSTICK',
@@ -1495,7 +1495,7 @@ class TitleScene extends Phaser.Scene {
       else gfx.fillStyle(0x9a9a9a).fillRect(x, 264, 3, 12).fillStyle(0xff1a1a).fillRect(x - 3, 259, 9, 8);
       label(this, x, 292, btn, 0x8c8c8c).setDepth(21);
     });
-    label(this, mid, 314, 'ABAJOX2: BAJAR VIGAS   PINTURA AMARILLA: SE ROMPE   BTN 6: SILENCIAR', 0x6a6a6a).setDepth(21);
+    label(this, mid, 314, 'ABAJOX2: BAJAR VIGAS   PINTURA AMARILLA: SE ROMPE   BTN 4: SILENCIAR', 0x6a6a6a).setDepth(21);
     this.pr = label(this, mid, 344, 'PULSA START', 0xffffff, 2).setDepth(21);
 
     const start = () => {
@@ -1777,11 +1777,15 @@ class GameScene extends Phaser.Scene {
   }
 
   sp(tool, x, y, vx, vy, expires) {
-    const p = this.pc.create(x, y, 'tool_' + tool).setDepth(14).setBounce(0.35).setDragX(160).setVelocity(vx, vy);
-    p.body.setSize(12, 12);
+    const p = this.pc.create(x, y, 'tool_' + tool).setDepth(14).setBounce(0.35).setDragX(160).setVelocity(vx, vy).setScale(1.7);
+    p.body.setSize(16, 16);
     p.tc = tool;
     p.ex = expires;
     p.pa = this.time.now + (expires ? 500 : 0);
+    // Warm additive halo plus a sprite glow so tools pop out of the dark.
+    p.gw = image(this, x, y, 'light', 45).setBlendMode(1).setScale(0.8).setAlpha(0.22).setTint(0xffe066);
+    if (p.preFX) p.preFX.addGlow(0xffe066, 3, 0, false, 0.08, 18);
+    p.once('destroy', () => p.gw.destroy());
   }
 
   bp() {
@@ -2357,6 +2361,10 @@ class GameScene extends Phaser.Scene {
     for (const item of [...this.pc.getChildren()]) {
       const left = item.ex - time;
       const urgent = left < 2000;
+      if (item.gw) {
+        const flash = urgent && floor(time / 80) % 2;
+        item.gw.setPosition(item.x, item.y).setScale(0.78 + 0.05 * sin(time / 240 + item.y * 0.11)).setAlpha((0.22 + 0.1 * sin(time / 190 + item.x * 0.13)) * (urgent ? (flash ? 0.5 : 1) : 1));
+      }
       if (!item.ex) item.setAlpha(1);
       else if (left <= 0) this.rl(item);
       else {
@@ -2401,7 +2409,10 @@ class GameScene extends Phaser.Scene {
       light(l.x, l.y, l.r * f);
       if (l.gw) l.gw.setAlpha(0.06 * f + flash * 0.05);
     }
-    for (const item of this.pc.getChildren()) light(item.x, item.y, 26, 0.7);
+    for (const item of this.pc.getChildren()) {
+      light(item.x, item.y, 44, 0.5);
+      light(item.x, item.y, 27, 1);
+    }
 
     const c = this.co;
     this.cn.setVisible(!!c);
