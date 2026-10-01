@@ -66,11 +66,14 @@ const clearTaps = () => {
 const BTN = {
   left: ['P1_L'],
   right: ['P1_R'],
+  up: ['P1_U'],
+  down: ['P1_D'],
   jump: ['P1_2', 'P1_U'],
   use: ['P1_1'],
   next: ['P1_3'],
   prev: ['P1_4'],
-  mute: ['P1_6'],
+  mute: ['P1_5'],
+  aim: ['P1_6'],
 };
 
 const midi = (m) => 440 * Math.pow(2, (m - 69) / 12);
@@ -1162,6 +1165,19 @@ function makeFx(scene) {
     c.fillStyle = '#fff';
     c.fillRect(0, 0, 2, 2);
   });
+  // Free-aim crosshair.
+  fromCanvas(scene, 'reticle', 11, 11, (c) => {
+    c.strokeStyle = 'rgba(255,255,255,0.9)';
+    c.lineWidth = 1;
+    c.beginPath();
+    c.arc(5, 5, 4, 0, Math.PI * 2);
+    c.stroke();
+    c.fillStyle = '#ff1a1a';
+    c.fillRect(5, 0, 1, 2);
+    c.fillRect(5, 9, 1, 2);
+    c.fillRect(0, 5, 2, 1);
+    c.fillRect(9, 5, 2, 1);
+  });
   fromCanvas(scene, 'blood', 3, 3, (c) => {
     c.fillStyle = '#c00010';
     c.fillRect(0, 0, 3, 3);
@@ -1633,7 +1649,7 @@ class TitleScene extends Phaser.Scene {
       .text(
         width / 2,
         240,
-        'STICK  move      BUTTON 1  use tool (hold: focus flashlight)\nBUTTON 2  jump / hold to glide      BUTTON 3 / 4  switch tool\n\nGet hit and you drop your tool \u2014 grab it back before it fades.',
+        'STICK  move      BUTTON 1  use tool (hold: focus flashlight)\nBUTTON 2  jump / hold to glide      BUTTON 3 / 4  switch tool\nBUTTON 6 + STICK  free aim      BUTTON 5  mute\n\nGet hit and you drop your tool \u2014 grab it back before it fades.',
         { fontFamily: 'monospace', fontSize: '11px', color: '#9a9a9a', align: 'center', lineSpacing: 4 },
       )
       .setOrigin(0.5)
@@ -1711,6 +1727,9 @@ class GameScene extends Phaser.Scene {
     this.gliding = false;
     this.stepTimer = 0;
     this.flicker = 1;
+    this.aiming = false;
+    this.aimAngle = 0;
+    this.aim = { x: 1, y: 0 };
 
     const cam = this.cameras.main;
     this.glitch = addCameraFx(cam, 0.04);
@@ -2004,6 +2023,7 @@ class GameScene extends Phaser.Scene {
 
     this.held = this.add.image(p.x, p.y, 'tool_flashlight').setDepth(11);
     this.umbrellaOpen = this.add.image(p.x, p.y, 'umbrella_open').setDepth(11).setVisible(false);
+    this.reticle = this.add.image(p.x, p.y, 'reticle').setDepth(62).setVisible(false);
 
     this.physics.add.collider(p, this.layer);
     this.physics.add.collider(p, this.crackedGroup);
@@ -2160,6 +2180,9 @@ class GameScene extends Phaser.Scene {
     const useDown = tap(...BTN.use);
     const useHeld = down(...BTN.use);
     const f = this.facing;
+    const ax = this.aim.x;
+    const ay = this.aim.y;
+    const aimAng = this.aimAngle;
     this.attackCooldown -= dt;
     this.focus = false;
     this.cone = null;
@@ -2168,20 +2191,20 @@ class GameScene extends Phaser.Scene {
     this.held.setVisible(!!this.equipped && !this.gliding && !this.dead);
     if (!this.equipped) return;
 
-    this.held.setTexture(`tool_${this.equipped}`).setFlipX(f < 0);
+    this.held.setTexture(`tool_${this.equipped}`).setFlipX(!this.aiming && f < 0);
     const swingT = Math.max(0, (this.swingUntil - time) / 180);
 
     switch (this.equipped) {
       case 'flashlight': {
-        this.held.setPosition(p.x + f * 8, p.y - 11).setScale(0.6).setRotation(0);
+        this.held.setPosition(p.x + ax * 8, p.y - 11 + ay * 8).setScale(0.6).setRotation(this.aiming ? aimAng : 0);
         this.focus = useHeld;
         if (Math.random() < 0.008) this.flicker = 0;
         this.flicker = Math.min(1, this.flicker + dt * 6);
         if (this.flicker > 0.5 && !this.dead) {
           this.cone = {
-            x: p.x + f * 12,
-            y: p.y - 11,
-            angle: f > 0 ? 0 : Math.PI,
+            x: p.x + ax * 12,
+            y: p.y - 11 + ay * 12,
+            angle: aimAng,
             range: this.focus ? 270 : 190,
             half: this.focus ? 0.2 : 0.4,
             power: this.focus ? 2.4 : 1,
@@ -2191,31 +2214,41 @@ class GameScene extends Phaser.Scene {
         break;
       }
       case 'crowbar': {
-        const ang = swingT > 0 ? Phaser.Math.Linear(1.9, -1.2, 1 - swingT) : 0.5;
-        this.held.setPosition(p.x + f * 7, p.y - 10).setScale(0.8).setRotation(f * ang);
+        const tilt = swingT > 0 ? Phaser.Math.Linear(1.9, -1.2, 1 - swingT) : 0.5;
+        this.held.setPosition(p.x + ax * 7, p.y - 10 + ay * 7).setScale(0.8).setRotation(this.aiming ? aimAng + tilt : f * tilt);
         if (useDown && this.attackCooldown <= 0) {
           this.attackCooldown = 0.38;
           this.swingUntil = time + 180;
           audio.play('swing');
-          const box = new Phaser.Geom.Rectangle(f > 0 ? p.x + 2 : p.x - 32, p.y - 28, 30, 46);
-          this.strike(box, 2, 220, true);
+          this.strike(this.aimBox(2, 30, 46), 2, 220, true);
         }
         break;
       }
       case 'umbrella': {
         const thrust = swingT > 0 ? 8 * swingT : 0;
-        this.held.setPosition(p.x + f * (6 + thrust), p.y - 10).setScale(0.7).setRotation(f * 1.57);
+        this.held.setPosition(p.x + ax * (6 + thrust), p.y - 10 + ay * (6 + thrust)).setScale(0.7).setRotation(this.aiming ? aimAng + 1.57 : f * 1.57);
         if (useDown && this.attackCooldown <= 0) {
           this.attackCooldown = 0.4;
           this.swingUntil = time + 180;
           audio.play('poke');
-          const box = new Phaser.Geom.Rectangle(f > 0 ? p.x + 2 : p.x - 28, p.y - 18, 26, 12);
-          this.strike(box, 1, 320, false);
+          this.strike(this.aimBox(2, 26, 16), 1, 320, false);
         }
         break;
       }
     }
     if (this.gliding) this.umbrellaOpen.setPosition(p.x, p.y - 30);
+  }
+
+  // Axis-aligned hitbox extending from the player along the current aim vector.
+  // `len` runs along the aim, `wide` across it; 8-way aim keeps it corner-correct.
+  aimBox(reach, len, wide) {
+    const { x: ax, y: ay } = this.aim;
+    const along = reach + len / 2;
+    const cx = this.player.x + ax * along;
+    const cy = this.player.y - 12 + ay * along;
+    const w = Math.abs(ax) * len + Math.abs(ay) * wide;
+    const h = Math.abs(ay) * len + Math.abs(ax) * wide;
+    return new Phaser.Geom.Rectangle(cx - w / 2, cy - h / 2, w, h);
   }
 
   // Melee hit on everything inside `box`.
@@ -2224,7 +2257,7 @@ class GameScene extends Phaser.Scene {
     const hitMonster = (m) => {
       if (!m.active || m.dying) return;
       if (Phaser.Geom.Intersects.RectangleToRectangle(box, m.getBounds())) {
-        this.damage(m, dmg, this.facing * knock);
+        this.damage(m, dmg, (this.aim.x || this.facing) * knock);
         hitSomething = true;
       }
     };
@@ -2519,16 +2552,44 @@ class GameScene extends Phaser.Scene {
     const p = this.player;
     if (this.dead || this.won) {
       if (!this.dead) p.setVelocityX(0);
+      this.aiming = false;
+      this.reticle.setVisible(false);
       clearTaps();
       return;
     }
 
     const left = down(...BTN.left);
     const right = down(...BTN.right);
-    const jumpDown = tap(...BTN.jump);
-    const jumpHeld = down(...BTN.jump);
-    const jumpUp = untap(...BTN.jump);
+    const up = down(...BTN.up);
+    const dn = down(...BTN.down);
     const grounded = p.body.blocked.down;
+
+    // Free aim: hold BUTTON 6 (L) and steer with the stick. The stick drives the
+    // reticle instead of movement, so the child plants their feet while aiming.
+    const hx = (right ? 1 : 0) - (left ? 1 : 0);
+    const vy = (dn ? 1 : 0) - (up ? 1 : 0);
+    this.aiming = down(...BTN.aim);
+    if (this.aiming) {
+      if (hx || vy) {
+        const q = Math.round(Math.atan2(vy, hx) / (Math.PI / 4)) * (Math.PI / 4);
+        this.aimAngle = q;
+        this.aim.x = Math.round(Math.cos(q));
+        this.aim.y = Math.round(Math.sin(q));
+        if (this.aim.x) this.facing = this.aim.x;
+      }
+      // Up aims instead of jumping while the aim modifier is held.
+      pressed.P1_U = false;
+      released.P1_U = false;
+    } else {
+      this.aimAngle = this.facing > 0 ? 0 : Math.PI;
+      this.aim.x = this.facing;
+      this.aim.y = 0;
+    }
+
+    const jumpKeys = this.aiming ? ['P1_2'] : BTN.jump;
+    const jumpDown = tap(...jumpKeys);
+    const jumpHeld = down(...jumpKeys);
+    const jumpUp = untap(...jumpKeys);
 
     if (grounded) {
       if (!this.wasGrounded && this.lastVy > 220) audio.play('land');
@@ -2538,7 +2599,7 @@ class GameScene extends Phaser.Scene {
     this.lastVy = p.body.velocity.y;
 
     if (time > this.stunUntil) {
-      const dir = (right ? 1 : 0) - (left ? 1 : 0);
+      const dir = this.aiming ? 0 : (right ? 1 : 0) - (left ? 1 : 0);
       p.setVelocityX(dir * RUN);
       if (dir) this.facing = dir;
     }
@@ -2588,6 +2649,15 @@ class GameScene extends Phaser.Scene {
       this.hint('floor', 'The floor here is cracked...');
     }
     if (p.x < 130 * T && p.x > 110 * T && p.y < 9 * T) this.hint('bell', 'The great bell. Ring it.');
+    if (this.aiming) this.hint('freeaim', 'FREE AIM \u2014 keep BUTTON 6 held, steer with the stick to aim your tool.', 3000);
+
+    // Free-aim reticle.
+    const dist = 42;
+    this.reticle
+      .setVisible(this.aiming)
+      .setPosition(p.x + Math.cos(this.aimAngle) * dist, p.y - 12 + Math.sin(this.aimAngle) * dist)
+      .setRotation(this.aimAngle)
+      .setAlpha(0.55 + 0.35 * Math.sin(time / 110));
 
     if (this.bellZone && !this.won && this.bellZone.contains(p.x, p.y - 10)) this.win();
   }
