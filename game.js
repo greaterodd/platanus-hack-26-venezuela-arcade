@@ -1,4 +1,4 @@
-// El Apagón — a gothic-horror metroidvania for the Platanus Hack 26 arcade.
+// El Apagón — a storm-drowned llanos metroidvania for the Platanus Hack 26 arcade.
 (() => {
 
 // DO NOT replace existing keys — they match the physical arcade cabinet wiring.
@@ -432,8 +432,9 @@ class AudioEngine {
 
 const audio = new AudioEngine();
 
-// Procedural art. The world is strictly black & white; the only colours are the
-// child's yellow raincoat and crimson (eyes, blood, a little stained glass).
+// Procedural art. The world is mostly black, white and bare-earth brown; the only
+// bright colours are the child's yellow raincoat and crimson (eyes, blood, a
+// little stained glass).
 
 const PAL = {
   '.': null,
@@ -649,7 +650,9 @@ const UMBRELLA_OPEN = [
   '..............5...............',
 ];
 
-const TILE = { BRICK: 0, BRICK_TOP: 1, BEAM: 2, BG: 3, BG_ALT: 4 };
+const TILE = { DIRT: 0, DIRT_TOP: 1, BEAM: 2, BG: 3, CAVE: 4, ROCK: 5, ROCK_TOP: 6, STONE: 7, STONE_TOP: 8 };
+// Rows at/above this are the abandoned church; rows below are cave rock.
+const CAVE_Y = 28;
 
 function makeArt(scene) {
   // Player frames: 0 idle, 1-3 run, 4 jump.
@@ -688,72 +691,112 @@ function makeArt(scene) {
   makeFx(scene);
 }
 
-function brick(c, ox, rand, base, mortar, top) {
-  c.fillStyle = mortar;
+// Barren-earth terrain: packed dirt up top, cave rock below, ruin stone inside
+// the abandoned church. Each tile is 16px wide and drawn at ox on the sheet.
+function dirt(c, ox, rand, top) {
+  c.fillStyle = '#2c2117';
   c.fillRect(ox, 0, 16, 16);
-  const rows = [0, 5, 10];
-  rows.forEach((y, i) => {
-    const off = i % 2 ? -4 : 0;
-    for (let x = off; x < 16; x += 8) {
-      const v = Math.floor(rand() * 14);
-      c.fillStyle = shade(base, v - 7);
-      const x0 = Math.max(0, x + 1);
-      const x1 = Math.min(16, x + 8);
-      c.fillRect(ox + x0, y + 1, x1 - x0, i === 2 ? 5 : 4);
-    }
-  });
-  // speckle
-  for (let i = 0; i < 10; i++) {
-    c.fillStyle = shade(base, rand() > 0.5 ? 14 : -10);
-    c.fillRect(ox + Math.floor(rand() * 16), Math.floor(rand() * 16), 1, 1);
+  const clump = ['#35281a', '#241b12', '#3d2d1c', '#1d150e'];
+  for (let i = 0; i < 34; i++) {
+    c.fillStyle = clump[Math.floor(rand() * 4)];
+    c.fillRect(ox + Math.floor(rand() * 15), Math.floor(rand() * 16), 1 + Math.floor(rand() * 3), 1);
+  }
+  for (let i = 0; i < 6; i++) {
+    c.fillStyle = rand() > 0.5 ? '#5b4a30' : '#6d5a3c';
+    c.fillRect(ox + Math.floor(rand() * 15), Math.floor(rand() * 15), 1, 1);
   }
   if (top) {
-    // rain-slick top edge
-    c.fillStyle = '#9a9a9a';
+    c.fillStyle = '#6b573a';
     c.fillRect(ox, 0, 16, 1);
-    c.fillStyle = '#5a5a5a';
+    c.fillStyle = '#4a3826';
     c.fillRect(ox, 1, 16, 1);
-    c.fillStyle = '#d0d0d0';
-    c.fillRect(ox + 3, 0, 3, 1);
-    c.fillRect(ox + 11, 0, 2, 1);
+    for (let i = 0; i < 5; i++) {
+      c.fillStyle = rand() > 0.5 ? '#5d5a2a' : '#3f3d1c';
+      c.fillRect(ox + Math.floor(rand() * 15), 0, 1, 1 + Math.floor(rand() * 2));
+    }
   }
 }
 
-function shade(hex, delta) {
-  const n = parseInt(hex.slice(1), 16);
-  const v = Math.max(0, Math.min(255, (n & 255) + delta));
-  const h = v.toString(16).padStart(2, '0');
-  return `#${h}${h}${h}`;
+function rock(c, ox, rand, top) {
+  c.fillStyle = '#1b1814';
+  c.fillRect(ox, 0, 16, 16);
+  for (let i = 0; i < 7; i++) {
+    c.fillStyle = rand() > 0.5 ? '#282320' : '#33302a';
+    const w = 4 + Math.floor(rand() * 9);
+    const h = 2 + Math.floor(rand() * 4);
+    c.fillRect(ox + Math.floor(rand() * (16 - w)), Math.floor(rand() * (16 - h)), w, h);
+  }
+  for (let i = 0; i < 5; i++) {
+    c.fillStyle = '#0f0d0b';
+    c.fillRect(ox + Math.floor(rand() * 16), Math.floor(rand() * 16), 1, 1 + Math.floor(rand() * 3));
+  }
+  if (top) {
+    c.fillStyle = '#4a463e';
+    c.fillRect(ox, 0, 16, 1);
+    c.fillStyle = '#2a2722';
+    c.fillRect(ox, 1, 16, 1);
+  }
+}
+
+function stone(c, ox, rand, top) {
+  c.fillStyle = '#1a1815';
+  c.fillRect(ox, 0, 16, 16);
+  const cols = ['#3a352e', '#2c2822', '#443d33'];
+  for (let i = 0; i < 18; i++) {
+    c.fillStyle = cols[Math.floor(rand() * 3)];
+    c.fillRect(ox + Math.floor(rand() * 15), Math.floor(rand() * 15), 1 + Math.floor(rand() * 3), 1);
+  }
+  c.fillStyle = '#0d0c0a';
+  c.fillRect(ox, 7, 16, 1);
+  c.fillRect(ox + 7, 0, 1, 7);
+  c.fillRect(ox + 3, 8, 1, 8);
+  if (top) {
+    c.fillStyle = '#69625a';
+    c.fillRect(ox, 0, 16, 1);
+    c.fillStyle = '#3a352e';
+    c.fillRect(ox, 1, 16, 1);
+  }
+}
+
+function wall(c, ox, rand, cave) {
+  c.fillStyle = cave ? '#12100d' : '#1a140d';
+  c.fillRect(ox, 0, 16, 16);
+  for (let i = 0; i < 14; i++) {
+    c.fillStyle = cave ? (rand() > 0.5 ? '#1a1712' : '#0d0b09') : rand() > 0.5 ? '#241c12' : '#0f0b07';
+    c.fillRect(ox + Math.floor(rand() * 15), Math.floor(rand() * 15), 1 + Math.floor(rand() * 2), 1);
+  }
 }
 
 function makeTiles(scene) {
   const rand = rng(7);
-  fromCanvas(scene, 'tiles', 16 * 5, 16, (c) => {
-    brick(c, 0, rand, '#3a3a3a', '#141414', false);
-    brick(c, 16, rand, '#3a3a3a', '#141414', true);
-    // wooden beam (one-way)
+  fromCanvas(scene, 'tiles', 16 * 9, 16, (c) => {
+    dirt(c, 0, rand, false);
+    dirt(c, 16, rand, true);
+    // dry beam (one-way platform)
     c.fillStyle = '#0c0c0c';
     c.fillRect(32, 0, 16, 6);
-    c.fillStyle = '#4a4a4a';
+    c.fillStyle = '#3f3222';
     c.fillRect(32, 0, 16, 4);
-    c.fillStyle = '#777';
+    c.fillStyle = '#6a5535';
     c.fillRect(32, 0, 16, 1);
-    c.fillStyle = '#2a2a2a';
+    c.fillStyle = '#2a2014';
     c.fillRect(34, 2, 5, 1);
     c.fillRect(42, 1, 4, 1);
-    c.fillStyle = '#1a1a1a';
+    c.fillStyle = '#1a1209';
     c.fillRect(33, 4, 2, 5);
     c.fillRect(45, 4, 2, 5);
-    // background walls (dark, low contrast)
-    brick(c, 48, rand, '#1c1c1c', '#0d0d0d', false);
-    brick(c, 64, rand, '#161616', '#0a0a0a', false);
+    wall(c, 48, rand, false);
+    wall(c, 64, rand, true);
+    rock(c, 80, rand, false);
+    rock(c, 96, rand, true);
+    stone(c, 112, rand, false);
+    stone(c, 128, rand, true);
   });
 
   fromCanvas(scene, 'cracked', 16, 16, (c) => {
-    brick(c, 0, rand, '#4a4a4a', '#1a1a1a', false);
+    rock(c, 0, rng(7), false);
     c.fillStyle = '#000';
-    const crack = [[8, 0], [7, 2], [8, 4], [6, 6], [7, 8], [9, 10], [8, 12], [10, 14], [9, 15]];
-    crack.forEach(([x, y]) => c.fillRect(x, y, 1, 2));
+    [[8, 0], [7, 2], [8, 4], [6, 6], [7, 8], [9, 10], [8, 12], [10, 14], [9, 15]].forEach(([x, y]) => c.fillRect(x, y, 1, 2));
     c.fillRect(3, 5, 4, 1);
     c.fillRect(9, 10, 4, 1);
     c.fillStyle = '#8a8a8a';
@@ -766,7 +809,7 @@ function makeTiles(scene) {
       const x = i * 4;
       for (let y = 0; y < 10; y++) {
         const half = Math.floor((y + 1) / 5);
-        c.fillStyle = y < 2 ? '#e6e6e6' : '#8c8c8c';
+        c.fillStyle = y < 2 ? '#cfc7b4' : '#6b6152';
         c.fillRect(x + 2 - half, 6 + y, 1 + half * 2, 1);
       }
     }
@@ -792,6 +835,23 @@ function makeTiles(scene) {
   });
 }
 
+// A leafless llanos tree: recursive limbs, drawn thick and gnarled.
+function drawTree(c, x0, y0, len, w, r) {
+  const b = (x, y, a, l, w) => {
+    if (l < 5 || w < 1) return;
+    const x2 = x + Math.cos(a) * l;
+    const y2 = y + Math.sin(a) * l;
+    c.lineWidth = w;
+    c.beginPath();
+    c.moveTo(x, y);
+    c.lineTo(x2, y2);
+    c.stroke();
+    b(x2, y2, a - 0.35 - r() * 0.4, l * 0.72, w * 0.68);
+    b(x2, y2, a + 0.3 + r() * 0.4, l * 0.68, w * 0.68);
+  };
+  b(x0, y0, -Math.PI / 2, len, w);
+}
+
 function makeProps(scene) {
   fromCanvas(scene, 'grave', 14, 18, (c) => {
     c.fillStyle = '#0c0c0c';
@@ -814,23 +874,36 @@ function makeProps(scene) {
     c.fillRect(5, 1, 2, 23);
     c.fillRect(1, 6, 10, 2);
   });
-  fromCanvas(scene, 'tree', 70, 110, (c) => {
-    c.strokeStyle = '#050505';
+  fromCanvas(scene, 'tree', 70, 112, (c) => {
+    c.strokeStyle = '#241a10';
     c.lineCap = 'round';
-    const r = rng(3);
-    const branch = (x, y, a, len, w) => {
-      if (len < 5 || w < 1) return;
-      const x2 = x + Math.cos(a) * len;
-      const y2 = y + Math.sin(a) * len;
-      c.lineWidth = w;
+    drawTree(c, 35, 112, 38, 7, rng(3));
+  });
+  fromCanvas(scene, 'scrub', 26, 12, (c) => {
+    const r = rng(17);
+    c.lineWidth = 1;
+    for (let i = 0; i < 16; i++) {
+      const x = 2 + r() * 22;
+      c.strokeStyle = r() > 0.5 ? '#4a4520' : '#33300f';
       c.beginPath();
-      c.moveTo(x, y);
-      c.lineTo(x2, y2);
+      c.moveTo(x, 12);
+      c.lineTo(x + (r() - 0.5) * 8, 12 - 3 - r() * 8);
       c.stroke();
-      branch(x2, y2, a - 0.35 - r() * 0.4, len * 0.72, w * 0.68);
-      branch(x2, y2, a + 0.3 + r() * 0.4, len * 0.68, w * 0.68);
+    }
+  });
+  fromCanvas(scene, 'stalagmite', 20, 24, (c) => {
+    const sp = (col, w) => {
+      c.fillStyle = col;
+      c.beginPath();
+      c.moveTo(10, 0);
+      c.lineTo(10 + w, 24);
+      c.lineTo(10 - w, 24);
+      c.closePath();
+      c.fill();
     };
-    branch(35, 110, -Math.PI / 2, 36, 7);
+    sp('#0c0a08', 9);
+    sp('#2f2a23', 7);
+    sp('#464039', 4);
   });
   // Candle (2 flame frames); flame drawn separately in makeFx.
   fromCanvas(scene, 'candle', 4, 10, (c) => {
@@ -1080,72 +1153,70 @@ function makeLogo(scene) {
 function makeBackdrops(scene) {
   fromCanvas(scene, 'sky', 640, 480, (c) => {
     const g = c.createLinearGradient(0, 0, 0, 480);
-    g.addColorStop(0, '#050505');
-    g.addColorStop(0.6, '#161616');
-    g.addColorStop(1, '#262626');
+    g.addColorStop(0, '#04050a');
+    g.addColorStop(0.55, '#141118');
+    g.addColorStop(0.8, '#2a1d19');
+    g.addColorStop(1, '#3c2b1c');
     c.fillStyle = g;
     c.fillRect(0, 0, 640, 480);
     const r = rng(21);
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 56; i++) {
       const x = r() * 700 - 30;
-      const y = r() * 270;
+      const y = r() * 260;
       const w = 60 + r() * 140;
-      c.fillStyle = `rgba(${r() > 0.5 ? '40,40,40' : '20,20,20'},0.5)`;
+      c.fillStyle = `rgba(${r() > 0.5 ? '34,30,30' : '16,14,18'},0.5)`;
       c.beginPath();
       c.ellipse(x, y, w / 2, 8 + r() * 14, 0, 0, Math.PI * 2);
       c.fill();
     }
   });
 
-  fromCanvas(scene, 'spires', 640, 480, (c) => {
+  // Far savanna: flat horizon, a ragged treeline and one church ruin.
+  fromCanvas(scene, 'hills', 640, 480, (c) => {
     const r = rng(5);
-    c.fillStyle = '#0b0b0b';
-    let x = 0;
-    while (x < 640) {
-      const w = 30 + r() * 60;
-      const h = 124 + r() * 140;
-      const top = 480 - h;
-      c.fillRect(x, top, w, h);
-      // spire
+    c.fillStyle = '#0a0908';
+    c.fillRect(0, 340, 640, 140);
+    c.beginPath();
+    c.moveTo(0, 352);
+    for (let x = 0; x <= 640; x += 32) c.lineTo(x, 340 - r() * 10);
+    c.lineTo(640, 480);
+    c.lineTo(0, 480);
+    c.closePath();
+    c.fill();
+    for (let x = 8; x < 640; x += 26 + r() * 50) {
+      c.fillStyle = '#060605';
+      const h = 18 + r() * 26;
+      c.fillRect(x, 340 - h, 2, h + 6);
       c.beginPath();
-      c.moveTo(x + w * 0.2, top);
-      c.lineTo(x + w / 2, top - 30 - r() * 60);
-      c.lineTo(x + w * 0.8, top);
+      c.ellipse(x + 1, 340 - h, 9 + r() * 8, 5 + r() * 5, 0, 0, Math.PI * 2);
       c.fill();
-      // pinnacles
-      c.fillRect(x, top - 10, 3, 10);
-      c.fillRect(x + w - 3, top - 10, 3, 10);
-      // dim windows
-      if (r() > 0.4) {
-        c.fillStyle = r() > 0.8 ? '#3a0004' : '#1c1c1c';
-        c.beginPath();
-        c.arc(x + w / 2, top + 30, 6, 0, Math.PI * 2);
-        c.fill();
-        c.fillStyle = '#0b0b0b';
-      }
-      x += w + r() * 20;
     }
+    c.fillStyle = '#0d0c0b';
+    c.fillRect(150, 296, 30, 44);
+    c.beginPath();
+    c.moveTo(144, 296);
+    c.lineTo(165, 272);
+    c.lineTo(186, 296);
+    c.closePath();
+    c.fill();
+    c.fillRect(146, 288, 38, 3);
+    c.fillStyle = '#2a0008';
+    c.fillRect(162, 312, 6, 12);
   });
 
-  fromCanvas(scene, 'buttress', 640, 480, (c) => {
+  // Nearer grove of dry trees and scrub, darker than the horizon.
+  fromCanvas(scene, 'grove', 640, 480, (c) => {
     const r = rng(8);
-    c.fillStyle = '#050505';
-    c.fillRect(0, 420, 640, 60);
-    for (let x = 0; x < 640; x += 160) {
-      const h = 140 + r() * 60;
-      c.fillRect(x + 10, 480 - h, 26, h);
+    c.fillStyle = '#050504';
+    c.fillRect(0, 430, 640, 50);
+    for (let x = -10; x < 660; x += 80 + r() * 90) drawTree(c, x, 440, 40 + r() * 40, 4 + r() * 3, r);
+    c.lineWidth = 1;
+    for (let x = 0; x < 640; x += 5 + r() * 9) {
+      c.strokeStyle = '#0b0a08';
       c.beginPath();
-      c.moveTo(x + 23, 480 - h - 40);
-      c.lineTo(x + 10, 480 - h);
-      c.lineTo(x + 36, 480 - h);
-      c.fill();
-      // arch
-      c.beginPath();
-      c.moveTo(x + 36, 480 - h + 20);
-      c.quadraticCurveTo(x + 100, 480 - h + 10, x + 150, 420);
-      c.lineTo(x + 140, 420);
-      c.quadraticCurveTo(x + 95, 480 - h + 30, x + 36, 480 - h + 34);
-      c.fill();
+      c.moveTo(x, 442);
+      c.lineTo(x + (r() - 0.5) * 10, 442 - 8 - r() * 16);
+      c.stroke();
     }
   });
 }
@@ -1248,25 +1319,27 @@ function buildWorld() {
   fill(W - 2, 0, W - 1, H - 1);
   fill(0, H - 2, W - 1, H - 1);
 
-  // Graveyard
+  // Llanos flatlands: dry earth, leafless trees and low scrub.
   fill(2, 26, 33, 37);
   fill(12, 25, 16, 25);
   fill(24, 24, 27, 25);
   e('player', 5, 26);
   e('shrine', 8, 26, { lit: true });
   e('tree', 3, 26);
+  e('tree', 12, 25);
   e('tree', 21, 26, { flip: true });
-  e('grave', 10, 26);
+  e('tree', 29, 26, { flip: true });
+  e('scrub', 10, 26);
+  e('scrub', 18, 26);
+  e('scrub', 24, 24);
+  e('scrub', 31, 26);
   e('grave', 14, 25);
-  e('grave', 18, 26);
   e('cross', 25, 24);
-  e('grave', 29, 26);
-  e('cross', 31, 26);
   e('shade', 20, 26);
   e('candle', 11, 26);
   e('candle', 30, 26);
 
-  // Cathedral facade with a veiled door.
+  // Abandoned church facade with a veiled door.
   fill(34, 0, 35, 20);
   fill(34, 26, 35, 37);
   e('veil', 34, 21, { w: 2, h: 5 });
@@ -1317,9 +1390,9 @@ function buildWorld() {
   e('candle', 40, 36);
   e('candle', 65, 36);
   e('candle', 80, 36);
-  e('cross', 38, 36);
-  e('grave', 44, 36);
-  e('grave', 74, 36);
+  e('stalagmite', 38, 36);
+  e('stalagmite', 44, 36);
+  e('stalagmite', 74, 36);
   // Shaft back up to the nave.
   fill(85, 26, 87, 27, EMPTY);
   beam(85, 87, 33);
@@ -1610,8 +1683,8 @@ class TitleScene extends Phaser.Scene {
     this.storm = new Storm(this, { minGap: 2500, maxGap: 6000 });
     this.storm.onStrike = (p) => this.glitch.hit(0.5 * p);
 
-    this.add.tileSprite(0, 84, width, height, 'spires').setOrigin(0).setScrollFactor(0).setDepth(-22);
-    this.add.tileSprite(0, 70, width, height, 'buttress').setOrigin(0).setScrollFactor(0).setDepth(-21);
+    this.add.tileSprite(0, 84, width, height, 'hills').setOrigin(0).setScrollFactor(0).setDepth(-22);
+    this.add.tileSprite(0, 70, width, height, 'grove').setOrigin(0).setScrollFactor(0).setDepth(-21);
 
     this.add.image(width / 2, height - 36, 'child', 0).setOrigin(0.5, 1).setScale(2).setDepth(10);
     this.add.rectangle(0, height - 36, width, 36, 0x050505).setOrigin(0).setDepth(9);
@@ -1626,7 +1699,7 @@ class TitleScene extends Phaser.Scene {
     this.titleShadow = this.add.image(width / 2 + 3, 98, 'logo').setTintFill(0xb00010).setDepth(20);
     this.title = this.add.image(width / 2, 96, 'logo').setDepth(21);
     this.add
-      .text(width / 2, 186, 'a nocturne in black, white & crimson', { fontFamily: serif, fontSize: '14px', color: '#8c8c8c', fontStyle: 'italic' })
+      .text(width / 2, 186, 'a storm over the venezuelan plains', { fontFamily: serif, fontSize: '14px', color: '#8c8c8c', fontStyle: 'italic' })
       .setOrigin(0.5)
       .setDepth(21);
 
@@ -1737,29 +1810,36 @@ class GameScene extends Phaser.Scene {
 
   buildBackdrop() {
     const { width, height } = this.scale;
-    this.spires = this.add.tileSprite(0, 0, width, height, 'spires').setOrigin(0).setScrollFactor(0).setDepth(-22);
-    this.buttress = this.add.tileSprite(0, 0, width, height, 'buttress').setOrigin(0).setScrollFactor(0).setDepth(-21);
+    this.hills = this.add.tileSprite(0, 0, width, height, 'hills').setOrigin(0).setScrollFactor(0).setDepth(-22);
+    this.grove = this.add.tileSprite(0, 0, width, height, 'grove').setOrigin(0).setScrollFactor(0).setDepth(-21);
   }
 
   buildTilemaps() {
     const { grid, interior } = this.world;
-    const rand = new Phaser.Math.RandomDataGenerator(['bg']);
+    // The mound is layered: dirt on the surface, ruin stone in the church
+    // above row CAVE_Y, and bare cave rock below it.
+    const solidTile = (x, y, top) => {
+      if (x >= 34 && y < CAVE_Y) return top ? TILE.STONE_TOP : TILE.STONE;
+      if (y >= CAVE_Y) return top ? TILE.ROCK_TOP : TILE.ROCK;
+      return top ? TILE.DIRT_TOP : TILE.DIRT;
+    };
+    const bgTile = (x, y) => (y >= CAVE_Y ? TILE.CAVE : x >= 34 ? TILE.STONE : TILE.BG);
 
     const data = grid.map((row, y) =>
       row.map((v, x) => {
-        if (v === SOLID) return y > 0 && grid[y - 1][x] !== SOLID ? TILE.BRICK_TOP : TILE.BRICK;
+        if (v === SOLID) return solidTile(x, y, y > 0 && grid[y - 1][x] !== SOLID);
         if (v === BEAM) return TILE.BEAM;
         return -1;
       }),
     );
-    const bgData = interior.map((row) => row.map((v) => (v ? (rand.frac() < 0.3 ? TILE.BG_ALT : TILE.BG) : -1)));
+    const bgData = interior.map((row, y) => row.map((v, x) => (v ? bgTile(x, y) : -1)));
 
     const bgMap = this.make.tilemap({ data: bgData, tileWidth: T, tileHeight: T });
     bgMap.createLayer(0, bgMap.addTilesetImage('tiles', 'tiles', T, T, 0, 0), 0, 0).setDepth(-10);
 
     const map = this.make.tilemap({ data, tileWidth: T, tileHeight: T });
     this.layer = map.createLayer(0, map.addTilesetImage('tiles', 'tiles', T, T, 0, 0), 0, 0).setDepth(0);
-    this.layer.setCollision([TILE.BRICK, TILE.BRICK_TOP]);
+    this.layer.setCollision([TILE.DIRT, TILE.DIRT_TOP, TILE.ROCK, TILE.ROCK_TOP, TILE.STONE, TILE.STONE_TOP]);
     this.layer.forEachTile((t) => {
       if (t.index === TILE.BEAM) t.setCollision(false, false, true, false);
     });
@@ -1861,6 +1941,12 @@ class GameScene extends Phaser.Scene {
         case 'grave':
         case 'cross':
           this.add.image(px, py + 1, ent.type).setOrigin(0.5, 1).setDepth(-2);
+          break;
+        case 'scrub':
+          this.add.image(px, py + 1, 'scrub').setOrigin(0.5, 1).setDepth(-2);
+          break;
+        case 'stalagmite':
+          this.add.image(px, py + 1, 'stalagmite').setOrigin(0.5, 1).setDepth(-1);
           break;
         case 'candle':
           this.add.image(px, py, 'candle').setOrigin(0.5, 1).setDepth(-1);
@@ -2121,7 +2207,7 @@ class GameScene extends Phaser.Scene {
     if (first) {
       audio.play('newtool');
       this.glitch.hit(0.4);
-      if (tool === 'crowbar') this.message('CROWBAR \u2014 press BUTTON 1 to swing. Cracked stone gives way.', 5000);
+      if (tool === 'crowbar') this.message('CROWBAR \u2014 press BUTTON 1 to swing. Cracked rock gives way.', 5000);
       if (tool === 'umbrella') this.message('UMBRELLA \u2014 hold BUTTON 2 while falling to glide.', 5000);
     } else {
       audio.play('pickup');
@@ -2688,10 +2774,10 @@ class GameScene extends Phaser.Scene {
 
   updateParallax() {
     const cam = this.cameras.main;
-    this.spires.tilePositionX = cam.scrollX * 0.1;
-    this.spires.y = 10 - cam.scrollY * 0.06;
-    this.buttress.tilePositionX = cam.scrollX * 0.25;
-    this.buttress.y = 21 - cam.scrollY * 0.15;
+    this.hills.tilePositionX = cam.scrollX * 0.1;
+    this.hills.y = 10 - cam.scrollY * 0.06;
+    this.grove.tilePositionX = cam.scrollX * 0.25;
+    this.grove.y = 21 - cam.scrollY * 0.15;
   }
 
   win() {
