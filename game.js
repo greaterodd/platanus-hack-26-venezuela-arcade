@@ -1,5 +1,4 @@
 // The Drowned Bell — a gothic-horror metroidvania for the Platanus Hack 26 arcade.
-// A child in a yellow raincoat, a storm, a cathedral full of things that hate the light.
 
 // DO NOT replace existing keys — they match the physical arcade cabinet wiring.
 const CABINET_KEYS = {
@@ -64,7 +63,6 @@ const clearTaps = () => {
   for (const c in released) released[c] = false;
 };
 
-// Controls (player 1).
 const BTN = {
   left: ['P1_L'],
   right: ['P1_R'],
@@ -74,9 +72,6 @@ const BTN = {
   prev: ['P1_4'],
   mute: ['P1_6'],
 };
-
-// Everything audible is synthesized with Web Audio: rain, thunder, a gothic
-// chiptune nocturne, and all sound effects. No audio files are loaded.
 
 const midi = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
@@ -130,7 +125,6 @@ class AudioEngine {
     this.amb.gain.value = 0.5;
     this.amb.connect(this.master);
 
-    // Shared noise buffers.
     const len = ctx.sampleRate * 3;
     this.white = ctx.createBuffer(1, len, ctx.sampleRate);
     this.brown = ctx.createBuffer(1, len, ctx.sampleRate);
@@ -149,8 +143,6 @@ class AudioEngine {
   get now() {
     return this.ctx.currentTime;
   }
-
-  // ---------- ambience ----------
 
   startRain() {
     const ctx = this.ctx;
@@ -198,7 +190,6 @@ class AudioEngine {
     src.start(t);
     src.stop(t + 4.5);
 
-    // Sharp crack on close strikes.
     if (delay < 0.5) {
       const c = ctx.createBufferSource();
       c.buffer = this.white;
@@ -213,8 +204,6 @@ class AudioEngine {
       c.stop(t + 0.4);
     }
   }
-
-  // ---------- music ----------
 
   startMusic() {
     if (!this.ctx || this.musicOn) return;
@@ -244,17 +233,14 @@ class AudioEngine {
     const cycle = Math.floor(step / 32);
     const chord = CHORDS[bar];
 
-    // Organ pad at the top of each bar.
     if (pos === 0) {
       for (const n of chord) {
         this.tone('sawtooth', midi(n), t, eighth * 8, 0.022, 900, 0.35);
         this.tone('sawtooth', midi(n) * 1.004, t, eighth * 8, 0.018, 900, 0.35);
       }
-      // A distant bell every four bars.
       if (bar === 0) this.bell(midi(38), t, 0.12, 5);
     }
 
-    // Bass pulse on the quarter notes.
     if (pos % 2 === 0) this.tone('square', midi(chord[0] - 12), t, eighth * 1.6, 0.05, 500, 0.01);
 
     // Chiptune arpeggio (drops out every 4th cycle for breathing room).
@@ -313,8 +299,6 @@ class AudioEngine {
       o.stop(t + len + 0.1);
     }
   }
-
-  // ---------- sfx ----------
 
   noiseHit(t, dur, vol, lo, hi, dest = this.sfx) {
     const src = this.ctx.createBufferSource();
@@ -435,7 +419,6 @@ class AudioEngine {
     }
   }
 
-  // Bit-crushed square chatter — the sound of the picture tearing.
   glitchNoise(dur) {
     const t = this.now;
     const n = Math.floor(dur / 0.03);
@@ -515,8 +498,6 @@ function rng(seed) {
     return s / 4294967296;
   };
 }
-
-// ---------------------------------------------------------------- characters
 
 const CHILD_BODY = [
   '................',
@@ -605,8 +586,6 @@ const BAT = [
   ],
 ];
 
-// ---------------------------------------------------------------- tools
-
 const ICONS = {
   flashlight: [
     '................',
@@ -685,7 +664,6 @@ function makeArt(scene) {
   for (const [k, rows] of Object.entries(ICONS)) sheet(scene, `tool_${k}`, [rows], 16, 16);
   sheet(scene, 'umbrella_open', [UMBRELLA_OPEN], 30, 12);
 
-  // Glowing eyes, drawn above the darkness.
   fromCanvas(scene, 'eyes', 8, 4, (c) => {
     c.fillStyle = 'rgba(255,0,0,0.35)';
     c.fillRect(0, 0, 8, 4);
@@ -707,8 +685,6 @@ function makeArt(scene) {
   makeBackdrops(scene);
   makeFx(scene);
 }
-
-// ---------------------------------------------------------------- tiles
 
 function brick(c, ox, rand, base, mortar, top) {
   c.fillStyle = mortar;
@@ -771,7 +747,6 @@ function makeTiles(scene) {
     brick(c, 64, rand, '#161616', '#0a0a0a', false);
   });
 
-  // Cracked wall: lighter stone split by dark fissures.
   fromCanvas(scene, 'cracked', 16, 16, (c) => {
     brick(c, 0, rand, '#4a4a4a', '#1a1a1a', false);
     c.fillStyle = '#000';
@@ -798,7 +773,6 @@ function makeTiles(scene) {
     c.fillRect(10, 7, 1, 3);
   });
 
-  // Veil: a wall of living shadow, tiled.
   fromCanvas(scene, 'veil', 32, 32, (c) => {
     const r = rng(99);
     c.fillStyle = '#000';
@@ -816,10 +790,7 @@ function makeTiles(scene) {
   });
 }
 
-// ---------------------------------------------------------------- props
-
 function makeProps(scene) {
-  // Tombstone
   fromCanvas(scene, 'grave', 14, 18, (c) => {
     c.fillStyle = '#0c0c0c';
     c.fillRect(1, 3, 12, 15);
@@ -841,7 +812,6 @@ function makeProps(scene) {
     c.fillRect(5, 1, 2, 23);
     c.fillRect(1, 6, 10, 2);
   });
-  // Dead tree silhouette
   fromCanvas(scene, 'tree', 70, 110, (c) => {
     c.strokeStyle = '#050505';
     c.lineCap = 'round';
@@ -883,7 +853,6 @@ function makeProps(scene) {
     c.fillRect(10, 1, 2, 7);
     c.fillRect(18, 0, 2, 4);
   });
-  // Checkpoint shrine: stone plinth with three candles, unlit / lit.
   ['shrine', 'shrine_lit'].forEach((key, lit) =>
     fromCanvas(scene, key, 24, 22, (c) => {
       c.fillStyle = '#0c0c0c';
@@ -907,7 +876,6 @@ function makeProps(scene) {
       }
     }),
   );
-  // Gothic lancet window with grey + crimson stained glass.
   fromCanvas(scene, 'window', 32, 72, (c) => {
     const arch = () => {
       c.beginPath();
@@ -972,7 +940,6 @@ function makeProps(scene) {
     c.fillStyle = '#161616';
     c.fillRect(13, 0, 3, 16);
   });
-  // Ribbed vault arch between pillars.
   fromCanvas(scene, 'vault', 128, 48, (c) => {
     c.strokeStyle = '#262626';
     c.lineWidth = 4;
@@ -989,7 +956,6 @@ function makeProps(scene) {
     c.quadraticCurveTo(114, 14, 116, 48);
     c.stroke();
   });
-  // The great bell.
   fromCanvas(scene, 'bell', 48, 52, (c) => {
     c.fillStyle = '#0c0c0c';
     c.beginPath();
@@ -1023,8 +989,6 @@ function makeProps(scene) {
     c.fillRect(23, 16, 2, 10);
   });
 }
-
-// ---------------------------------------------------------------- lights
 
 function makeLights(scene) {
   fromCanvas(scene, 'light', 128, 128, (c) => {
@@ -1062,10 +1026,7 @@ function makeLights(scene) {
   });
 }
 
-// ---------------------------------------------------------------- backdrops
-
 function makeBackdrops(scene) {
-  // Storm sky
   fromCanvas(scene, 'sky', 640, 480, (c) => {
     const g = c.createLinearGradient(0, 0, 0, 480);
     g.addColorStop(0, '#050505');
@@ -1085,7 +1046,6 @@ function makeBackdrops(scene) {
     }
   });
 
-  // Distant city of spires, repeated horizontally.
   fromCanvas(scene, 'spires', 640, 480, (c) => {
     const r = rng(5);
     c.fillStyle = '#0b0b0b';
@@ -1116,7 +1076,6 @@ function makeBackdrops(scene) {
     }
   });
 
-  // Closer silhouettes: flying buttresses and arches.
   fromCanvas(scene, 'buttress', 640, 480, (c) => {
     const r = rng(8);
     c.fillStyle = '#050505';
@@ -1139,8 +1098,6 @@ function makeBackdrops(scene) {
     }
   });
 }
-
-// ---------------------------------------------------------------- fx
 
 function makeFx(scene) {
   fromCanvas(scene, 'drop', 4, 14, (c) => {
@@ -1184,7 +1141,6 @@ function makeFx(scene) {
     c.arc(3, 3, 3, 0, Math.PI * 2);
     c.fill();
   });
-  // Candle flame, 2 frames.
   sheet(
     scene,
     'flame',
@@ -1195,7 +1151,6 @@ function makeFx(scene) {
     5,
     5,
   );
-  // Hearts
   const heart = ['.RR.RR.', 'RrrRrrR', 'RrrrrrR', '.RrrrR.', '..RrR..', '...R...'];
   const empty = ['.44.44.', '4..4..4', '4.....4', '.4...4.', '..4.4..', '...4...'];
   sheet(scene, 'heart', [heart, empty], 7, 6);
@@ -1242,7 +1197,7 @@ function buildWorld() {
   fill(W - 2, 0, W - 1, H - 1);
   fill(0, H - 2, W - 1, H - 1);
 
-  // ---------------------------------------------------------- graveyard
+  // Graveyard
   fill(2, 26, 33, 37);
   fill(12, 25, 16, 25);
   fill(24, 24, 27, 25);
@@ -1265,7 +1220,7 @@ function buildWorld() {
   fill(34, 26, 35, 37);
   e('veil', 34, 21, { w: 2, h: 5 });
 
-  // ---------------------------------------------------------- nave
+  // Nave
   fill(36, 0, 89, 3); // vaulted ceiling
   fill(36, 26, 89, 27); // floor (the crypt lies below)
   fill(88, 0, 89, 6); // right wall, upper
@@ -1295,7 +1250,7 @@ function buildWorld() {
   e('rose', 61.5, 5);
   for (let x = 39; x < 84; x += 9) e('vault', x, 4);
 
-  // ---------------------------------------------------------- crypt
+  // Crypt
   fill(36, 36, 87, 37); // crypt floor
   fill(55, 36, 59, 37, EMPTY); // spike pit
   fill(67, 36, 71, 37, EMPTY); // spike pit
@@ -1320,10 +1275,10 @@ function buildWorld() {
   beam(85, 87, 30);
   beam(85, 87, 27);
 
-  // ---------------------------------------------------------- chasm
+  // Chasm
   spikes(90, 107, 38, true);
 
-  // ---------------------------------------------------------- belfry tower
+  // Belfry tower
   fill(108, 17, 147, 37); // base
   fill(106, 17, 107, 17); // stone lip outside the door
   fill(108, 0, 109, 12); // outer wall (door at rows 13-16)
@@ -1350,7 +1305,6 @@ function buildWorld() {
 
   return { grid, interior, ents };
 }
-
 
 // Digital-glitch camera filter: RGB split, tear bands, datamosh blocks,
 // pixel-sort streaks, scanline corruption and film grain.
@@ -1470,8 +1424,6 @@ function addCameraFx(camera, base) {
   return glitch;
 }
 
-
-// Night sky, endless rain, lightning bolts, and thunder.
 // `flash` (0..1) is how lit the world is right now — the game uses it to lift the darkness.
 class Storm {
   constructor(scene, { rainBackDepth = 40, rainFrontDepth = 62, flashDepth = 55, minGap = 4000, maxGap = 10000 } = {}) {
@@ -1532,7 +1484,6 @@ class Storm {
     const { width } = this.scene.scale;
     this.drawBolt(Phaser.Math.Between(40, width - 40));
     this.flash = power;
-    // Lightning rarely strikes just once.
     this.scene.time.delayedCall(80, () => (this.flash = 0.15));
     this.scene.time.delayedCall(150, () => {
       this.flash = power;
@@ -1576,8 +1527,6 @@ class Storm {
   }
 }
 
-
-// Generates every texture procedurally and registers the animations.
 class BootScene extends Phaser.Scene {
   constructor() {
     super('Boot');
@@ -1598,7 +1547,6 @@ class BootScene extends Phaser.Scene {
   }
 }
 
-
 class TitleScene extends Phaser.Scene {
   constructor() {
     super('Title');
@@ -1614,7 +1562,6 @@ class TitleScene extends Phaser.Scene {
     this.add.tileSprite(0, 84, width, height, 'spires').setOrigin(0).setScrollFactor(0).setDepth(-22);
     this.add.tileSprite(0, 70, width, height, 'buttress').setOrigin(0).setScrollFactor(0).setDepth(-21);
 
-    // The child, small against the storm.
     this.add.image(width / 2, height - 36, 'child', 0).setOrigin(0.5, 1).setScale(2).setDepth(10);
     this.add.rectangle(0, height - 36, width, 36, 0x050505).setOrigin(0).setDepth(9);
     this.add.image(width / 2 - 120, height - 36, 'shade', 0).setOrigin(0.5, 1).setScale(2).setDepth(8).setAlpha(0.8);
@@ -1675,7 +1622,6 @@ class TitleScene extends Phaser.Scene {
     this.glitch.tick(dt);
     this.prompt.setAlpha(Math.floor(time / 500) % 2 ? 0.35 : 1);
 
-    // The title itself glitches: jitter, RGB-ish offset and the odd tear.
     const g = this.glitch.intensity;
     const jitter = Math.random() < 0.06 + g * 0.3 ? Phaser.Math.Between(-6, 6) : 0;
     this.title.x = this.scale.width / 2 + jitter;
@@ -1683,7 +1629,6 @@ class TitleScene extends Phaser.Scene {
     for (const e of this.eyes) e.setAlpha(0.6 + Math.random() * 0.4 + this.storm.flash);
   }
 }
-
 
 const RUN = 130;
 const JUMP = 360;
@@ -1743,8 +1688,6 @@ class GameScene extends Phaser.Scene {
 
     this.time.delayedCall(900, () => this.hint('start', 'STICK move \u00b7 BUTTON 1 jump \u00b7 your FLASHLIGHT burns what hides in the dark'));
   }
-
-  // ------------------------------------------------------------------ build
 
   buildBackdrop() {
     const { width, height } = this.scale;
@@ -2086,8 +2029,6 @@ class GameScene extends Phaser.Scene {
     clearTaps();
   }
 
-  // ------------------------------------------------------------------ helpers
-
   tileAt(px, py) {
     const tx = Math.floor(px / T);
     const ty = Math.floor(py / T);
@@ -2142,8 +2083,6 @@ class GameScene extends Phaser.Scene {
       if (this.decals.length > 80) this.decals.shift().destroy();
     }
   }
-
-  // ------------------------------------------------------------------ tools
 
   equip(tool) {
     if (tool && !this.inventory.has(tool)) return;
@@ -2339,7 +2278,6 @@ class GameScene extends Phaser.Scene {
     this.shades.getChildren().slice().forEach(burn);
     this.bats.getChildren().slice().forEach(burn);
 
-    // Veils dissolve under sustained light.
     for (const v of this.veils) {
       if (v.strength <= 0) continue;
       let lit = false;
@@ -2373,8 +2311,6 @@ class GameScene extends Phaser.Scene {
     v.body.enable = false;
     this.tweens.add({ targets: v, alpha: 0, scaleX: 0.2, duration: 400, onComplete: () => v.destroy() });
   }
-
-  // ------------------------------------------------------------------ monsters
 
   damage(m, dmg, knockX) {
     m.hp -= dmg;
@@ -2420,7 +2356,6 @@ class GameScene extends Phaser.Scene {
     if (this.dead) return;
     this.hurt(this.player.x + (Math.random() - 0.5));
     if (s.abyss) {
-      // The chasm keeps what falls into it: back to the candles.
       if (!this.dead && !this.falling) {
         this.falling = true;
         this.time.delayedCall(350, () => {
@@ -2482,7 +2417,6 @@ class GameScene extends Phaser.Scene {
     const d = Phaser.Math.Distance.Between(b.x, b.y, px, py);
 
     if (b.burning > 0) {
-      // Flee the beam.
       b.state = 'return';
       b.stateUntil = time + 1200;
       const a = Math.atan2(b.y - py, b.x - px);
@@ -2514,8 +2448,6 @@ class GameScene extends Phaser.Scene {
     b.setFlipX(b.body.velocity.x < 0);
     b.eyes.setPosition(b.x, b.y + 1.5);
   }
-
-  // ------------------------------------------------------------------ player
 
   // Returns false if the hit was ignored.
   hurt(srcX) {
@@ -2609,12 +2541,10 @@ class GameScene extends Phaser.Scene {
     this.gliding = this.equipped === 'umbrella' && !grounded && jumpHeld && p.body.velocity.y > 0;
     if (this.gliding) p.setVelocityY(Math.min(p.body.velocity.y, GLIDE_FALL));
 
-    // Switching tools
     if (tap(...BTN.prev)) this.cycleTool(-1);
     if (tap(...BTN.next)) this.cycleTool(1);
     if (tap(...BTN.mute)) audio.music.gain.value = audio.music.gain.value > 0 ? 0 : 0.32;
 
-    // Animation
     p.setFlipX(this.facing < 0);
     if (!grounded) p.anims.play('child-jump', true);
     else if (Math.abs(p.body.velocity.x) > 5) {
@@ -2628,7 +2558,6 @@ class GameScene extends Phaser.Scene {
 
     p.setAlpha(time < this.invulnUntil ? (Math.floor(time / 70) % 2 ? 0.3 : 1) : 1);
 
-    // Checkpoints
     for (const s of this.shrines) {
       if (Math.abs(p.x - s.x) < 18 && Math.abs(p.y - s.y) < 24) {
         if (!s.lit) this.lightShrine(s);
@@ -2637,7 +2566,6 @@ class GameScene extends Phaser.Scene {
       }
     }
 
-    // Contextual hints
     if (p.x > 27 * T && p.x < 34 * T) this.hint('veil', 'A veil of living shadow. Shine the flashlight on it.');
     if (p.x > 84 * T && p.x < 90 * T && p.y < 12 * T && !this.found.has('umbrella')) {
       this.hint('chasm', 'Too far to jump... if only something could slow the fall.', 4000);
@@ -2647,11 +2575,8 @@ class GameScene extends Phaser.Scene {
     }
     if (p.x < 130 * T && p.x > 110 * T && p.y < 9 * T) this.hint('bell', 'The great bell. Ring it.');
 
-    // Victory
     if (this.bellZone && !this.won && this.bellZone.contains(p.x, p.y - 10)) this.win();
   }
-
-  // ------------------------------------------------------------------ world fx
 
   updatePickups(time) {
     this.dropBars.clear();
@@ -2758,7 +2683,6 @@ class GameScene extends Phaser.Scene {
   }
 
   updateDread() {
-    // Nearby monsters make the picture sick.
     let nearest = Infinity;
     for (const m of [...this.shades.getChildren(), ...this.bats.getChildren()]) {
       if (m.dying) continue;
@@ -2774,8 +2698,6 @@ class GameScene extends Phaser.Scene {
     this.buttress.tilePositionX = cam.scrollX * 0.25;
     this.buttress.y = 21 - cam.scrollY * 0.15;
   }
-
-  // ------------------------------------------------------------------ ending
 
   win() {
     this.won = true;
@@ -2803,8 +2725,6 @@ class GameScene extends Phaser.Scene {
     });
   }
 
-  // ------------------------------------------------------------------ loop
-
   update(time, delta) {
     const dt = Math.min(delta, 50) / 1000;
 
@@ -2827,13 +2747,11 @@ class GameScene extends Phaser.Scene {
     this.updateDarkness(time);
     this.updateHud();
 
-    // HUD text shivers with the glitch.
     const gi = this.glitch.intensity;
     this.msg.x = this.scale.width / 2 + (Math.random() < gi ? Phaser.Math.Between(-4, 4) : 0);
     if (this.bigText.alpha) this.bigText.x = this.scale.width / 2 + Phaser.Math.Between(-6, 6) * gi;
   }
 }
-
 
 new Phaser.Game({
   type: Phaser.WEBGL,
