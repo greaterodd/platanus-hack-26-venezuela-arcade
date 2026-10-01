@@ -170,6 +170,16 @@ class AudioEngine {
     g2.gain.value = 0.08;
     body.connect(g2).connect(this.amb);
     body.start();
+
+    this.rainHiss = g;
+    this.rainBody = g2;
+  }
+
+  // The storm is muffled underground and inside the church.
+  setRainVolume(scale) {
+    if (!this.rainHiss) return;
+    this.rainHiss.gain.value = 0.06 * scale;
+    this.rainBody.gain.value = 0.08 * scale;
   }
 
   thunder(delay = 0.6, power = 1) {
@@ -676,7 +686,7 @@ const UMBRELLA_OPEN = [
   '..............5...............',
 ];
 
-const TILE = { DIRT: 0, DIRT_TOP: 1, BEAM: 2, BG: 3, CAVE: 4, ROCK: 5, ROCK_TOP: 6, STONE: 7, STONE_TOP: 8 };
+const TILE = { DIRT: 0, DIRT_TOP: 1, BEAM: 2, BG: 3, CAVE: 4, ROCK: 5, ROCK_TOP: 6, STONE: 7, STONE_TOP: 8, BLACK: 9 };
 // Rows at/above this are the abandoned church; rows below are cave rock.
 const CAVE_Y = 28;
 
@@ -854,7 +864,7 @@ function wall(c, ox, rand, cave) {
 
 function makeTiles(scene) {
   const rand = rng(7);
-  fromCanvas(scene, 'tiles', 16 * 9, 16, (c) => {
+  fromCanvas(scene, 'tiles', 16 * 10, 16, (c) => {
     dirt(c, 0, rand, false);
     dirt(c, 16, rand, true);
     // dry beam (one-way platform)
@@ -876,6 +886,9 @@ function makeTiles(scene) {
     rock(c, 96, rand, true);
     stone(c, 112, rand, false);
     stone(c, 128, rand, true);
+    // Buried rock: pure black, so the underside of the world reads as nothing.
+    c.fillStyle = '#000000';
+    c.fillRect(144, 0, 16, 16);
   });
 
   fromCanvas(scene, 'cracked', 16, 16, (c) => {
@@ -1648,6 +1661,7 @@ function buildWorld() {
   e('stalagmite', 38, 36);
   e('stalagmite', 44, 36);
   e('stalagmite', 74, 36);
+  for (const x of [40, 47, 54, 63, 70, 79, 85]) e('stalactite', x, 28);
   // Shaft back up to the nave.
   fill(85, 26, 87, 27, EMPTY);
   beam(85, 87, 33);
@@ -1708,8 +1722,7 @@ function buildWorld() {
   const pi = ents.findIndex((o) => o.type === 'player');
   if (pi >= 0) ents.splice(pi, 1);
   // A thin crust of earth over blackness: the woods are only trunks and fog.
-  for (let y = 28; y < H; y++) for (let x = 0; x < OX + 2; x++) grid[y][x] = EMPTY;
-  fill(2, 26, OX + 1, 27); // forest floor
+  fill(2, 26, OX + 1, H - 1); // floor + buried rock, which the biome draws black
   e('player', 9, 26);
   e('house', 6, 26);
   e('shrine', 12, 26, { lit: true });
@@ -2155,9 +2168,21 @@ class GameScene extends Phaser.Scene {
 
   buildTilemaps() {
     const { grid, interior } = this.world;
-    // The mound is layered: packed dirt on the open hillside, bare cave rock
-    // below row CAVE_Y, and ruin stone only in the church at the very end.
+    // A thin crust of textured rock over pure black. Only the exposed faces
+    // and the cave are drawn; everything buried is opaque darkness, so the
+    // world never shows through to the other side.
+    const CAVE_L = 34 + OX;
+    const CAVE_R = 89 + OX;
+    const inCave = (x, y) => x >= CAVE_L && x <= CAVE_R && y >= CAVE_Y - 1;
+    const exposed = (x, y, top) =>
+      top ||
+      (y > 1 && grid[y - 1][x] === SOLID && grid[y - 2][x] !== SOLID) ||
+      (x > 0 && grid[y][x - 1] === EMPTY) ||
+      (x < W - 1 && grid[y][x + 1] === EMPTY) ||
+      (y < H - 1 && grid[y + 1][x] === EMPTY);
     const solidTile = (x, y, top) => {
+      if (inCave(x, y)) return top ? TILE.ROCK_TOP : TILE.ROCK;
+      if (!exposed(x, y, top)) return TILE.BLACK;
       if (x >= 106 + OX && y < CAVE_Y) return top ? TILE.STONE_TOP : TILE.STONE;
       if (y >= CAVE_Y) return top ? TILE.ROCK_TOP : TILE.ROCK;
       return top ? TILE.DIRT_TOP : TILE.DIRT;
@@ -2178,7 +2203,7 @@ class GameScene extends Phaser.Scene {
 
     const map = this.make.tilemap({ data, tileWidth: T, tileHeight: T });
     this.layer = map.createLayer(0, map.addTilesetImage('tiles', 'tiles', T, T, 0, 0), 0, 0).setDepth(0);
-    this.layer.setCollision([TILE.DIRT, TILE.DIRT_TOP, TILE.ROCK, TILE.ROCK_TOP, TILE.STONE, TILE.STONE_TOP]);
+    this.layer.setCollision([TILE.DIRT, TILE.DIRT_TOP, TILE.ROCK, TILE.ROCK_TOP, TILE.STONE, TILE.STONE_TOP, TILE.BLACK]);
     this.layer.forEachTile((t) => {
       if (t.index === TILE.BEAM) t.setCollision(false, false, true, false);
     });
@@ -2305,6 +2330,9 @@ class GameScene extends Phaser.Scene {
           break;
         case 'stalagmite':
           this.add.image(px, py + 1, 'stalagmite').setOrigin(0.5, 1).setDepth(-1);
+          break;
+        case 'stalactite':
+          this.add.image(px, py, 'stalagmite').setOrigin(0.5, 0).setFlipY(true).setDepth(-1);
           break;
         case 'candle':
           this.add.image(px, py, 'candle').setOrigin(0.5, 1).setDepth(-1);
@@ -3205,6 +3233,12 @@ class GameScene extends Phaser.Scene {
     } else {
       this.coneGlow.setVisible(false);
     }
+
+    // Deep in the cave the roof seals the world above into pure darkness.
+    if (this.player.x > (34 + OX) * T && this.player.x < (89 + OX) * T && this.player.y > CAVE_Y * T) {
+      const ceil = (CAVE_Y - 1) * T - sy;
+      if (ceil > 0) dark.fill(0x000000, 1, 0, 0, cam.width, ceil);
+    }
   }
 
   updateDread() {
@@ -3508,6 +3542,15 @@ class GameScene extends Phaser.Scene {
     if (flat !== this.flatCam) {
       this.flatCam = flat;
       this.cameras.main.setDeadzone(flat ? 1 : 0, flat ? 600 : 0);
+    }
+
+    // The storm is muffled inside the cave and inside the church.
+    const indoors =
+      (this.player.x > (34 + OX) * T && this.player.x < (89 + OX) * T && this.player.y > CAVE_Y * T) ||
+      (this.player.x > (106 + OX) * T && this.player.y < CAVE_Y * T);
+    if (indoors !== this.indoors) {
+      this.indoors = indoors;
+      audio.setRainVolume(indoors ? 0.5 : 1);
     }
 
     this.updatePlayer(dt, time);
