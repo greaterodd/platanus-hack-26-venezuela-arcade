@@ -66,8 +66,8 @@ const clearTaps = () => {
 const BTN = {
   left: ['P1_L'],
   right: ['P1_R'],
-  jump: ['P1_1', 'P1_U'],
-  use: ['P1_2'],
+  jump: ['P1_2', 'P1_U'],
+  use: ['P1_1'],
   next: ['P1_3'],
   prev: ['P1_4'],
   mute: ['P1_6'],
@@ -1589,7 +1589,7 @@ class TitleScene extends Phaser.Scene {
       .text(
         width / 2,
         212,
-        'STICK  move      BUTTON 1  jump / hold to glide\nBUTTON 2  use tool (hold: focus flashlight)      BUTTON 3 / 4  switch tool\n\nGet hit and you drop your tool \u2014 grab it back before it fades.',
+        'STICK  move      BUTTON 1  use tool (hold: focus flashlight)\nBUTTON 2  jump / hold to glide      BUTTON 3 / 4  switch tool\n\nGet hit and you drop your tool \u2014 grab it back before it fades.',
         { fontFamily: 'monospace', fontSize: '11px', color: '#9a9a9a', align: 'center', lineSpacing: 4 },
       )
       .setOrigin(0.5)
@@ -1686,7 +1686,7 @@ class GameScene extends Phaser.Scene {
     cam.setBounds(0, 0, W * T, H * T);
     cam.startFollow(this.player, true, 0.12, 0.12, 0, 30);
 
-    this.time.delayedCall(900, () => this.hint('start', 'STICK move \u00b7 BUTTON 1 jump \u00b7 your FLASHLIGHT burns what hides in the dark'));
+    this.time.delayedCall(900, () => this.hint('start', 'STICK move \u00b7 BUTTON 2 jump \u00b7 your FLASHLIGHT burns what hides in the dark'));
   }
 
   buildBackdrop() {
@@ -2109,8 +2109,8 @@ class GameScene extends Phaser.Scene {
     if (first) {
       audio.play('newtool');
       this.glitch.hit(0.4);
-      if (tool === 'crowbar') this.message('CROWBAR \u2014 press BUTTON 2 to swing. Cracked stone gives way.', 5000);
-      if (tool === 'umbrella') this.message('UMBRELLA \u2014 hold BUTTON 1 while falling to glide.', 5000);
+      if (tool === 'crowbar') this.message('CROWBAR \u2014 press BUTTON 1 to swing. Cracked stone gives way.', 5000);
+      if (tool === 'umbrella') this.message('UMBRELLA \u2014 hold BUTTON 2 while falling to glide.', 5000);
     } else {
       audio.play('pickup');
       this.message(`Got your ${TOOL_NAMES[tool]} back.`, 1800);
@@ -2297,7 +2297,7 @@ class GameScene extends Phaser.Scene {
       if (Math.random() < 0.2) this.glitchFx.emitParticleAt(v.rect.centerX, Phaser.Math.Between(v.rect.top, v.rect.bottom), 1);
       if (Math.random() < 0.05) audio.play('burn');
       if (v.strength <= 0) this.dissolveVeil(v);
-      else this.hint('veil-focus', 'It recoils from the light... hold BUTTON 2 to focus the beam.');
+      else this.hint('veil-focus', 'It recoils from the light... hold BUTTON 1 to focus the beam.');
     }
   }
 
