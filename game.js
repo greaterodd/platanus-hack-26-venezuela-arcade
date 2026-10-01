@@ -1680,6 +1680,7 @@ const GLIDE_FALL = 36;
 const MAX_HEARTS = 3;
 const DROP_TIME = 5000; // how long a dropped tool waits on the ground
 const BASE_DARK = 0.8;
+const HUD_LINGER = 4000; // ms the HUD stays up after a tool change or a hit
 const TOOLS = ['flashlight', 'crowbar', 'umbrella'];
 const TOOL_NAMES = { flashlight: 'FLASHLIGHT', crowbar: 'CROWBAR', umbrella: 'UMBRELLA' };
 
@@ -2027,45 +2028,11 @@ class GameScene extends Phaser.Scene {
   }
 
   buildHud() {
-    const { width, height } = this.scale;
-    this.heartIcons = [];
-    for (let i = 0; i < MAX_HEARTS; i++) {
-      this.heartIcons.push(this.add.image(14 + i * 18, 14, 'heart', 0).setScale(2).setScrollFactor(0).setDepth(100));
-    }
-    this.slotGfx = this.add.graphics().setScrollFactor(0).setDepth(100);
-    this.slotIcons = TOOLS.map((t, i) =>
-      this.add.image(width - 86 + i * 28, 16, `tool_${t}`).setScrollFactor(0).setDepth(101),
-    );
-    this.slotUnknown = TOOLS.map((_, i) =>
-      this.add
-        .text(width - 86 + i * 28, 16, '?', { fontFamily: 'monospace', fontSize: '12px', color: '#555' })
-        .setOrigin(0.5)
-        .setScrollFactor(0)
-        .setDepth(101),
-    );
-    this.toolLabel = this.add
-      .text(width - 12, 34, '', { fontFamily: 'monospace', fontSize: '10px', color: '#cfcfcf' })
-      .setOrigin(1, 0)
-      .setScrollFactor(0)
-      .setDepth(101);
-    this.msg = this.add
-      .text(width / 2, height - 22, '', {
-        fontFamily: 'monospace',
-        fontSize: '11px',
-        color: '#e8e8e8',
-        backgroundColor: '#000000aa',
-        padding: { x: 6, y: 3 },
-      })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(101)
-      .setAlpha(0);
-    this.bigText = this.add
-      .text(width / 2, height / 2, '', { fontFamily: 'Georgia, serif', fontSize: '34px', color: '#ff1a1a', fontStyle: 'bold' })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(102)
-      .setAlpha(0);
+    // The HUD lives in its own scene so the darkness, vignette and glitch
+    // filters never dim it. It fades out on its own when nothing changes.
+    this.hud = this.scene.get('Hud');
+    this.scene.launch('Hud');
+    this.events.once('shutdown', () => this.scene.stop('Hud'));
   }
 
   buildInput() {
@@ -2104,9 +2071,7 @@ class GameScene extends Phaser.Scene {
   }
 
   message(text, ms = 3500) {
-    this.msg.setText(text).setAlpha(1);
-    this.tweens.killTweensOf(this.msg);
-    this.tweens.add({ targets: this.msg, alpha: 0, delay: ms, duration: 600 });
+    if (this.hud) this.hud.showMessage(text, ms);
   }
 
   hint(id, text, ms) {
@@ -2133,6 +2098,7 @@ class GameScene extends Phaser.Scene {
     if (tool === this.equipped) return;
     this.equipped = tool;
     audio.play('poke');
+    if (this.hud) this.hud.pulse();
   }
 
   cycleTool(dir) {
@@ -2149,6 +2115,7 @@ class GameScene extends Phaser.Scene {
     this.found.add(tool);
     this.inventory.add(tool);
     this.equipped = tool;
+    if (this.hud) this.hud.pulse();
     item.destroy();
     if (first) {
       audio.play('newtool');
@@ -2167,6 +2134,7 @@ class GameScene extends Phaser.Scene {
     this.equipped = null;
     this.spawnPickup(tool, this.player.x, this.player.y - 14, -dir * Phaser.Math.Between(40, 90), -220, this.time.now + DROP_TIME);
     audio.play('drop');
+    if (this.hud) this.hud.pulse();
     if (!this.hintsShown.has('drop')) {
       this.hint('drop', `You dropped the ${TOOL_NAMES[tool]}! Grab it before the dark takes it back.`, 3500);
     } else {
@@ -2506,6 +2474,7 @@ class GameScene extends Phaser.Scene {
     audio.play('hurt');
     this.glitch.hit(0.7);
     this.cameras.main.shake(160, 0.012);
+    if (this.hud) this.hud.pulse();
 
     if (this.equipped) {
       this.dropTool(dir);
@@ -2525,9 +2494,9 @@ class GameScene extends Phaser.Scene {
     audio.play('death');
     this.glitch.hit(1.2);
     this.cameras.main.shake(400, 0.02);
-    this.bigText.setText('THEY FOUND YOU').setAlpha(1);
+    if (this.hud) this.hud.big('THEY FOUND YOU');
     this.time.delayedCall(2200, () => {
-      this.bigText.setAlpha(0);
+      if (this.hud) this.hud.clearBig();
       this.hearts = MAX_HEARTS;
       this.dead = false;
       p.setVisible(true);
@@ -2543,6 +2512,7 @@ class GameScene extends Phaser.Scene {
     this.invulnUntil = this.time.now + 1500;
     this.glitch.hit(0.6);
     audio.play('glitch');
+    if (this.hud) this.hud.pulse();
   }
 
   updatePlayer(dt, time) {
@@ -2706,26 +2676,6 @@ class GameScene extends Phaser.Scene {
     }
   }
 
-  updateHud() {
-    this.heartIcons.forEach((h, i) => h.setFrame(i < this.hearts ? 0 : 1));
-    const { width } = this.scale;
-    const g = this.slotGfx.clear();
-    const dropped = new Set(this.pickups.getChildren().filter((i) => i.expires).map((i) => i.tool));
-    TOOLS.forEach((t, i) => {
-      const x = width - 86 + i * 28;
-      const eq = this.equipped === t;
-      g.fillStyle(0x000000, 0.75).fillRect(x - 12, 4, 24, 24);
-      g.lineStyle(eq ? 2 : 1, eq ? 0xff1a1a : 0x555555, 1).strokeRect(x - 12, 4, 24, 24);
-      const has = this.inventory.has(t);
-      const known = this.found.has(t);
-      this.slotUnknown[i].setVisible(!known);
-      this.slotIcons[i].setVisible(known);
-      this.slotIcons[i].setAlpha(has ? 1 : dropped.has(t) ? (Math.floor(this.time.now / 150) % 2 ? 0.15 : 0.5) : 0.15);
-    });
-    this.toolLabel.setText(this.equipped ? TOOL_NAMES[this.equipped] : 'EMPTY HANDS');
-    this.toolLabel.setColor(this.equipped ? '#cfcfcf' : '#ff1a1a');
-  }
-
   updateDread() {
     let nearest = Infinity;
     for (const m of [...this.shades.getChildren(), ...this.bats.getChildren()]) {
@@ -2789,11 +2739,106 @@ class GameScene extends Phaser.Scene {
     this.updateDread();
     this.glitch.tick(dt);
     this.updateDarkness(time);
-    this.updateHud();
 
-    const gi = this.glitch.intensity;
-    this.msg.x = this.scale.width / 2 + (Math.random() < gi ? Phaser.Math.Between(-4, 4) : 0);
-    if (this.bigText.alpha) this.bigText.x = this.scale.width / 2 + Phaser.Math.Between(-6, 6) * gi;
+    // HUD text shivers with the glitch.
+    if (this.hud && this.hud.msg) {
+      const gi = this.glitch.intensity;
+      this.hud.msg.x = this.scale.width / 2 + (Math.random() < gi ? Phaser.Math.Between(-4, 4) : 0);
+      if (this.hud.bigText.alpha) this.hud.bigText.x = this.scale.width / 2 + Phaser.Math.Between(-6, 6) * gi;
+    }
+  }
+}
+
+// Heads-up display, rendered in its own unfiltered scene so the darkness,
+// vignette and glitch never wash it out. It reads live state from the game
+// scene and fades away when nothing has changed for a while.
+class HudScene extends Phaser.Scene {
+  constructor() {
+    super('Hud');
+  }
+
+  create() {
+    this.game = this.scene.get('Game');
+    const { width, height } = this.scale;
+    this.heartIcons = [];
+    for (let i = 0; i < MAX_HEARTS; i++) {
+      this.heartIcons.push(this.add.image(14 + i * 18, 14, 'heart', 0).setScale(2));
+    }
+    this.slotGfx = this.add.graphics();
+    this.slotIcons = TOOLS.map((t, i) => this.add.image(width - 86 + i * 28, 16, `tool_${t}`));
+    this.slotUnknown = TOOLS.map((_, i) =>
+      this.add.text(width - 86 + i * 28, 16, '?', { fontFamily: 'monospace', fontSize: '12px', color: '#8a8a8a' }).setOrigin(0.5),
+    );
+    this.toolLabel = this.add
+      .text(width - 12, 34, '', { fontFamily: 'monospace', fontSize: '10px', color: '#ffffff' })
+      .setOrigin(1, 0);
+    this.panel = this.add.container(0, 0, [
+      ...this.heartIcons,
+      this.slotGfx,
+      ...this.slotIcons,
+      ...this.slotUnknown,
+      this.toolLabel,
+    ]);
+    this.msg = this.add
+      .text(width / 2, height - 22, '', {
+        fontFamily: 'monospace',
+        fontSize: '11px',
+        color: '#ffffff',
+        backgroundColor: '#000000cc',
+        padding: { x: 6, y: 3 },
+      })
+      .setOrigin(0.5)
+      .setAlpha(0);
+    this.bigText = this.add
+      .text(width / 2, height / 2, '', { fontFamily: 'Georgia, serif', fontSize: '34px', color: '#ff1a1a', fontStyle: 'bold' })
+      .setOrigin(0.5)
+      .setAlpha(0);
+    this.hideAt = this.time.now + HUD_LINGER;
+  }
+
+  pulse() {
+    this.hideAt = this.time.now + HUD_LINGER;
+  }
+
+  showMessage(text, ms = 3500) {
+    this.msg.setText(text).setAlpha(1);
+    this.tweens.killTweensOf(this.msg);
+    this.tweens.add({ targets: this.msg, alpha: 0, delay: ms, duration: 600 });
+  }
+
+  big(text) {
+    this.bigText.setText(text).setAlpha(1);
+  }
+
+  clearBig() {
+    this.bigText.setAlpha(0);
+  }
+
+  update(time, delta) {
+    const g = this.game;
+    if (!g || !g.player) return;
+
+    this.heartIcons.forEach((h, i) => h.setFrame(i < g.hearts ? 0 : 1));
+    const { width } = this.scale;
+    const gr = this.slotGfx.clear();
+    const dropped = new Set(g.pickups.getChildren().filter((i) => i.expires).map((i) => i.tool));
+    TOOLS.forEach((t, i) => {
+      const x = width - 86 + i * 28;
+      const eq = g.equipped === t;
+      gr.fillStyle(0x0a0d12, 0.92).fillRect(x - 12, 4, 24, 24);
+      gr.lineStyle(eq ? 2 : 1, eq ? 0xff2a2a : 0xc8d0d8, 1).strokeRect(x - 12, 4, 24, 24);
+      const has = g.inventory.has(t);
+      const known = g.found.has(t);
+      this.slotUnknown[i].setVisible(!known);
+      this.slotIcons[i].setVisible(known);
+      this.slotIcons[i].setAlpha(has ? 1 : dropped.has(t) ? (Math.floor(g.time.now / 150) % 2 ? 0.3 : 0.65) : 0.3);
+    });
+    this.toolLabel.setText(g.equipped ? TOOL_NAMES[g.equipped] : 'EMPTY HANDS');
+    this.toolLabel.setColor(g.equipped ? '#ffffff' : '#ff3b3b');
+
+    // Fade the panel out once the linger window lapses.
+    const want = time < this.hideAt ? 1 : 0;
+    this.panel.alpha = Phaser.Math.Linear(this.panel.alpha, want, Math.min(1, delta / 160));
   }
 }
 
@@ -2814,5 +2859,5 @@ new Phaser.Game({
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
-  scene: [BootScene, TitleScene, GameScene],
+  scene: [BootScene, TitleScene, GameScene, HudScene],
 });
