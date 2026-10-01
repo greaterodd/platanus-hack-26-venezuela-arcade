@@ -156,7 +156,7 @@ class AudioEngine {
     lp.type = 'lowpass';
     lp.frequency.value = 7000;
     const g = ctx.createGain();
-    g.gain.value = 0.16;
+    g.gain.value = 0.06;
     hiss.connect(hp).connect(lp).connect(g).connect(this.amb);
     hiss.start();
 
@@ -164,7 +164,7 @@ class AudioEngine {
     body.buffer = this.brown;
     body.loop = true;
     const g2 = ctx.createGain();
-    g2.gain.value = 0.22;
+    g2.gain.value = 0.08;
     body.connect(g2).connect(this.amb);
     body.start();
   }
@@ -183,8 +183,8 @@ class AudioEngine {
     lp.frequency.exponentialRampToValueAtTime(90, t + 3.5);
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(1.6 * power, t + 0.08);
-    g.gain.setValueAtTime(1.2 * power, t + 0.5);
+    g.gain.exponentialRampToValueAtTime(2.2 * power, t + 0.08);
+    g.gain.setValueAtTime(1.7 * power, t + 0.5);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 4.2);
     src.connect(lp).connect(g).connect(this.amb);
     src.start(t);
@@ -197,7 +197,7 @@ class AudioEngine {
       hp.type = 'highpass';
       hp.frequency.value = 1500;
       const cg = ctx.createGain();
-      cg.gain.setValueAtTime(0.5 * power, t);
+      cg.gain.setValueAtTime(0.75 * power, t);
       cg.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
       c.connect(hp).connect(cg).connect(this.amb);
       c.start(t);
