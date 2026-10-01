@@ -1,6 +1,6 @@
-// El Apagón — a storm-drowned llanos metroidvania for the Platanus Hack 26 arcade.
-(() => {
+// El Apagón — a gothic-horror metroidvania for the Platanus Hack 26 arcade.
 
+(() => {
 // DO NOT replace existing keys — they match the physical arcade cabinet wiring.
 const CABINET_KEYS = {
   P1_U: ['w'],
@@ -27,6 +27,9 @@ const CABINET_KEYS = {
   START2: ['2'],
 };
 
+const { PI, abs, atan2, ceil, cos, floor, hypot, max, min, random, round, sign, sin, tan } = Math;
+const between = Phaser.Math.Between;
+
 const KEY_TO_ARCADE = {};
 for (const [code, keys] of Object.entries(CABINET_KEYS)) {
   for (const key of keys) KEY_TO_ARCADE[key.length === 1 ? key.toLowerCase() : key] = code;
@@ -34,9 +37,9 @@ for (const [code, keys] of Object.entries(CABINET_KEYS)) {
 
 // held[code]: button is down. Presses/releases are latched until consumed, so taps
 // shorter than a frame still register.
-const held = Object.create(null);
-const pressed = Object.create(null);
-const released = Object.create(null);
+const held = {};
+let pressed = {};
+let released = {};
 let anyPress = null;
 
 const arcadeCode = (e) => KEY_TO_ARCADE[e.key.length === 1 ? e.key.toLowerCase() : e.key];
@@ -55,28 +58,25 @@ window.addEventListener('keyup', (e) => {
   held[code] = false;
 });
 
-// Did any of these buttons go down (or up) since the last check? Consumes the latch.
-const tap = (...codes) => codes.reduce((hit, c) => (pressed[c] ? ((pressed[c] = false), true) : hit), false);
-const untap = (...codes) => codes.reduce((hit, c) => (released[c] ? ((released[c] = false), true) : hit), false);
-const down = (...codes) => codes.some((c) => held[c]);
-const clearTaps = () => {
-  for (const c in pressed) pressed[c] = false;
-  for (const c in released) released[c] = false;
-};
+// Did this button go down (or up) since the last check? Consumes the latch.
+const tap = (c) => pressed[c] && !(pressed[c] = false);
+const untap = (c) => released[c] && !(released[c] = false);
+const down = (c) => held[c];
+const clearTaps = () => (pressed = {}, released = {});
 
-const BTN = {
-  left: ['P1_L'],
-  right: ['P1_R'],
-  up: ['P1_U'],
-  down: ['P1_D'],
-  jump: ['P1_1'],
-  use: ['P1_2'],
-  prev: ['P1_4'],
-  next: ['P1_5'],
-  mute: ['P1_6'],
-};
+const B_LEFT = 'P1_L';
+const B_RIGHT = 'P1_R';
+const B_UP = 'P1_U';
+const B_DOWN = 'P1_D';
+const B_JUMP = 'P1_1';
+const B_USE = 'P1_2';
+const B_PREV = 'P1_5';
+const B_NEXT = 'P1_6';
+const B_MUTE = 'P1_4';
 
-const midi = (m) => 440 * Math.pow(2, (m - 69) / 12);
+// Audio: everything is synthesised on one shared context, built on the first press.
+
+const midi = (m) => 440 * 2 ** ((m - 69) / 12);
 
 // D minor: i - VI - iv - V (harmonic minor, so the V is major with a C#).
 const CHORDS = [
@@ -85,434 +85,358 @@ const CHORDS = [
   [43, 46, 50], // Gm
   [45, 49, 52], // A
 ];
-// Eighth-note lead, one row per bar; null = rest.
+// Eighth-note lead, one row per bar; 0 = rest.
 const MELODY = [
-  [69, null, null, 65, 64, null, 62, null],
-  [65, null, null, 62, 60, null, 58, null],
-  [62, null, 58, null, 67, null, 65, 64],
-  [61, null, null, null, 64, null, 57, null],
+  [69, 0, 0, 65, 64, 0, 62, 0],
+  [65, 0, 0, 62, 60, 0, 58, 0],
+  [62, 0, 58, 0, 67, 0, 65, 64],
+  [61, 0, 0, 0, 64, 0, 57, 0],
 ];
 const ARP = [0, 1, 2, 1, 0, 2, 1, 2];
 
-class AudioEngine {
-  constructor() {
-    this.ctx = null;
-    this.musicOn = false;
+// Oscillator shapes, by index.
+const WAVES = ['square', 'sawtooth', 'sine', 'triangle'];
+const SQUARE = 0;
+const SAW = 1;
+const SINE = 2;
+const TRIANGLE = 3;
+
+// ac: the context. master/music/sfx/amb: mix buses. white/brown: 3s noise buffers.
+let ac, master, music, sfx, amb, white, brown, musicStep, musicAt, musicTimer;
+
+const now = () => ac.currentTime;
+const chain = (...nodes) => nodes.reduce((a, b) => (a.connect(b), b));
+const gain = (v, dest) => {
+  const g = ac.createGain();
+  if (v) g.gain.value = v;
+  if (dest) g.connect(dest);
+  return g;
+};
+const filter = (type, freq) => {
+  const f = ac.createBiquadFilter();
+  f.type = type + 'pass';
+  if (freq) f.frequency.value = freq;
+  return f;
+};
+const osc = (wave, freq) => {
+  const o = ac.createOscillator();
+  o.type = WAVES[wave];
+  if (freq) o.frequency.value = freq;
+  return o;
+};
+const noise = (buffer, loop) => {
+  const s = ac.createBufferSource();
+  s.buffer = buffer;
+  if (loop) s.loop = true;
+  return s;
+};
+// Set `param` to v0 at t0, then glide exponentially to v1 at t1.
+const slide = (param, v0, t0, v1, t1) => {
+  param.setValueAtTime(v0, t0);
+  param.exponentialRampToValueAtTime(v1, t1);
+};
+const run = (node, t, end) => {
+  node.start(t);
+  node.stop(end);
+};
+
+function initAudio() {
+  if (ac) return ac.resume();
+  ac = new AudioContext();
+
+  const comp = ac.createDynamicsCompressor();
+  comp.threshold.value = -14;
+  comp.ratio.value = 4;
+  comp.connect(ac.destination);
+
+  master = gain(0.9, comp);
+  music = gain(0.32, master);
+  sfx = gain(0.7, master);
+  amb = gain(0.5, master);
+
+  const len = ac.sampleRate * 3;
+  white = ac.createBuffer(1, len, ac.sampleRate);
+  brown = ac.createBuffer(1, len, ac.sampleRate);
+  const w = white.getChannelData(0);
+  const b = brown.getChannelData(0);
+  for (let i = 0, last = 0; i < len; i++) {
+    w[i] = random() * 2 - 1;
+    last = (last + 0.02 * w[i]) / 1.02;
+    b[i] = last * 3.5;
   }
 
-  init() {
-    if (this.ctx) {
-      if (this.ctx.state === 'suspended') this.ctx.resume();
-      return;
-    }
-    const ctx = (this.ctx = new (window.AudioContext || window.webkitAudioContext)());
+  // Rain: a hiss plus a low rumble, looping for good.
+  const hiss = noise(white, true);
+  chain(hiss, filter('high', 900), filter('low', 7000), gain(0.16), amb);
+  hiss.start();
+  const body = noise(brown, true);
+  chain(body, gain(0.22), amb);
+  body.start();
+}
 
-    const comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = -14;
-    comp.ratio.value = 4;
-    comp.connect(ctx.destination);
+function thunder(delay = 0.6, power = 1) {
+  if (!ac) return;
+  const t = now() + delay;
 
-    this.master = ctx.createGain();
-    this.master.gain.value = 0.9;
-    this.master.connect(comp);
+  const src = noise(brown);
+  src.playbackRate.value = 0.6 + random() * 0.3;
+  const lp = filter('low');
+  slide(lp.frequency, 900, t, 90, t + 3.5);
+  const g = gain();
+  slide(g.gain, 0.0001, t, 1.6 * power, t + 0.08);
+  slide(g.gain, 1.2 * power, t + 0.5, 0.0001, t + 4.2);
+  chain(src, lp, g, amb);
+  run(src, t, t + 4.5);
 
-    this.music = ctx.createGain();
-    this.music.gain.value = 0.32;
-    this.music.connect(this.master);
-
-    this.sfx = ctx.createGain();
-    this.sfx.gain.value = 0.7;
-    this.sfx.connect(this.master);
-
-    this.amb = ctx.createGain();
-    this.amb.gain.value = 0.5;
-    this.amb.connect(this.master);
-
-    const len = ctx.sampleRate * 3;
-    this.white = ctx.createBuffer(1, len, ctx.sampleRate);
-    this.brown = ctx.createBuffer(1, len, ctx.sampleRate);
-    const w = this.white.getChannelData(0);
-    const b = this.brown.getChannelData(0);
-    let last = 0;
-    for (let i = 0; i < len; i++) {
-      w[i] = Math.random() * 2 - 1;
-      last = (last + 0.02 * w[i]) / 1.02;
-      b[i] = last * 3.5;
-    }
-
-    this.startRain();
-  }
-
-  get now() {
-    return this.ctx.currentTime;
-  }
-
-  startRain() {
-    const ctx = this.ctx;
-    const hiss = ctx.createBufferSource();
-    hiss.buffer = this.white;
-    hiss.loop = true;
-    const hp = ctx.createBiquadFilter();
-    hp.type = 'highpass';
-    hp.frequency.value = 900;
-    const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass';
-    lp.frequency.value = 7000;
-    const g = ctx.createGain();
-    g.gain.value = 0.06;
-    hiss.connect(hp).connect(lp).connect(g).connect(this.amb);
-    hiss.start();
-
-    const body = ctx.createBufferSource();
-    body.buffer = this.brown;
-    body.loop = true;
-    const g2 = ctx.createGain();
-    g2.gain.value = 0.08;
-    body.connect(g2).connect(this.amb);
-    body.start();
-
-    this.rainHiss = g;
-    this.rainBody = g2;
-  }
-
-  // The storm is muffled underground and inside the church.
-  setRainVolume(scale) {
-    if (!this.rainHiss) return;
-    this.rainHiss.gain.value = 0.06 * scale;
-    this.rainBody.gain.value = 0.08 * scale;
-  }
-
-  thunder(delay = 0.6, power = 1) {
-    if (!this.ctx) return;
-    const ctx = this.ctx;
-    const t = this.now + delay;
-
-    const src = ctx.createBufferSource();
-    src.buffer = this.brown;
-    src.playbackRate.value = 0.6 + Math.random() * 0.3;
-    const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass';
-    lp.frequency.setValueAtTime(900, t);
-    lp.frequency.exponentialRampToValueAtTime(90, t + 3.5);
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(2.2 * power, t + 0.08);
-    g.gain.setValueAtTime(1.7 * power, t + 0.5);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 4.2);
-    src.connect(lp).connect(g).connect(this.amb);
-    src.start(t);
-    src.stop(t + 4.5);
-
-    if (delay < 0.5) {
-      const c = ctx.createBufferSource();
-      c.buffer = this.white;
-      const hp = ctx.createBiquadFilter();
-      hp.type = 'highpass';
-      hp.frequency.value = 1500;
-      const cg = ctx.createGain();
-      cg.gain.setValueAtTime(0.75 * power, t);
-      cg.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
-      c.connect(hp).connect(cg).connect(this.amb);
-      c.start(t);
-      c.stop(t + 0.4);
-    }
-  }
-
-  startMusic() {
-    if (!this.ctx || this.musicOn) return;
-    this.musicOn = true;
-    this.step = 0;
-    this.nextTime = this.now + 0.1;
-    this.timer = setInterval(() => this.schedule(), 25);
-  }
-
-  stopMusic() {
-    this.musicOn = false;
-    clearInterval(this.timer);
-  }
-
-  schedule() {
-    const eighth = 60 / 72 / 2;
-    while (this.nextTime < this.now + 0.15) {
-      this.playStep(this.step, this.nextTime, eighth);
-      this.nextTime += eighth;
-      this.step++;
-    }
-  }
-
-  playStep(step, t, eighth) {
-    const bar = Math.floor(step / 8) % 4;
-    const pos = step % 8;
-    const cycle = Math.floor(step / 32);
-    const chord = CHORDS[bar];
-
-    if (pos === 0) {
-      for (const n of chord) {
-        this.tone('sawtooth', midi(n), t, eighth * 8, 0.022, 900, 0.35);
-        this.tone('sawtooth', midi(n) * 1.004, t, eighth * 8, 0.018, 900, 0.35);
-      }
-      if (bar === 0) this.bell(midi(38), t, 0.12, 5);
-    }
-
-    if (pos % 2 === 0) this.tone('square', midi(chord[0] - 12), t, eighth * 1.6, 0.05, 500, 0.01);
-
-    // Chiptune arpeggio (drops out every 4th cycle for breathing room).
-    if (cycle % 4 !== 3) {
-      const n = chord[ARP[pos]] + 12;
-      this.tone('square', midi(n), t, eighth * 0.7, 0.018, 2500, 0.005);
-    }
-
-    // Lead melody plays every other cycle.
-    const m = MELODY[bar][pos];
-    if (m && cycle % 2 === 1) this.tone('square', midi(m), t, eighth * 1.8, 0.035, 3000, 0.02, true);
-  }
-
-  tone(type, freq, t, dur, vol, cutoff = 2000, attack = 0.01, vibrato = false, dest = this.music) {
-    const ctx = this.ctx;
-    const o = ctx.createOscillator();
-    o.type = type;
-    o.frequency.value = freq;
-    if (vibrato) {
-      const lfo = ctx.createOscillator();
-      const lg = ctx.createGain();
-      lfo.frequency.value = 5.5;
-      lg.gain.value = freq * 0.012;
-      lfo.connect(lg).connect(o.frequency);
-      lfo.start(t);
-      lfo.stop(t + dur + 0.1);
-    }
-    const f = ctx.createBiquadFilter();
-    f.type = 'lowpass';
-    f.frequency.value = cutoff;
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.linearRampToValueAtTime(vol, t + attack);
-    g.gain.setValueAtTime(vol, t + Math.max(attack, dur * 0.6));
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(f).connect(g).connect(dest);
-    o.start(t);
-    o.stop(t + dur + 0.05);
-  }
-
-  bell(freq, t, vol, len, dest = this.music) {
-    // Inharmonic partials of a cast bell.
-    const partials = [
-      [0.5, 1], [1, 0.8], [1.19, 0.5], [1.5, 0.35], [2, 0.3], [2.74, 0.18], [3.76, 0.1],
-    ];
-    for (const [ratio, amp] of partials) {
-      const o = this.ctx.createOscillator();
-      o.type = 'sine';
-      o.frequency.value = freq * ratio;
-      const g = this.ctx.createGain();
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(vol * amp, t + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + len / ratio ** 0.5);
-      o.connect(g).connect(dest);
-      o.start(t);
-      o.stop(t + len + 0.1);
-    }
-  }
-
-  noiseHit(t, dur, vol, lo, hi, dest = this.sfx) {
-    const src = this.ctx.createBufferSource();
-    src.buffer = this.white;
-    src.playbackRate.value = 0.5 + Math.random();
-    const bp = this.ctx.createBiquadFilter();
-    bp.type = 'bandpass';
-    bp.frequency.setValueAtTime(hi, t);
-    bp.frequency.exponentialRampToValueAtTime(lo, t + dur);
-    bp.Q.value = 0.8;
-    const g = this.ctx.createGain();
-    g.gain.setValueAtTime(vol, t);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    src.connect(bp).connect(g).connect(dest);
-    src.start(t, Math.random() * 2);
-    src.stop(t + dur + 0.05);
-  }
-
-  sweep(type, f0, f1, dur, vol, t = this.now) {
-    const o = this.ctx.createOscillator();
-    o.type = type;
-    o.frequency.setValueAtTime(f0, t);
-    o.frequency.exponentialRampToValueAtTime(f1, t + dur);
-    const g = this.ctx.createGain();
-    g.gain.setValueAtTime(vol, t);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(g).connect(this.sfx);
-    o.start(t);
-    o.stop(t + dur + 0.05);
-  }
-
-  play(name) {
-    if (!this.ctx) return;
-    const t = this.now;
-    switch (name) {
-      case 'jump':
-        this.sweep('square', 220, 440, 0.1, 0.05);
-        break;
-      case 'land':
-        this.noiseHit(t, 0.08, 0.15, 200, 600);
-        break;
-      case 'step':
-        this.noiseHit(t, 0.04, 0.05, 300, 1200);
-        break;
-      case 'swing':
-        this.noiseHit(t, 0.15, 0.25, 500, 3000);
-        break;
-      case 'poke':
-        this.noiseHit(t, 0.08, 0.2, 800, 2500);
-        break;
-      case 'clang':
-        this.tone('square', 1250, t, 0.12, 0.06, 5000, 0.001, false, this.sfx);
-        this.tone('square', 1870, t, 0.08, 0.04, 5000, 0.001, false, this.sfx);
-        break;
-      case 'crumble':
-        this.noiseHit(t, 0.6, 0.6, 60, 900);
-        this.noiseHit(t + 0.1, 0.4, 0.3, 80, 600);
-        break;
-      case 'flesh':
-        this.noiseHit(t, 0.18, 0.4, 120, 900);
-        this.sweep('sawtooth', 160, 60, 0.15, 0.08);
-        break;
-      case 'hurt':
-        this.sweep('square', 600, 90, 0.35, 0.12);
-        this.noiseHit(t, 0.25, 0.4, 150, 1200);
-        this.glitchNoise(0.25);
-        break;
-      case 'drop':
-        this.sweep('triangle', 900, 200, 0.25, 0.12);
-        this.tone('square', 190, t + 0.05, 0.1, 0.05, 2000, 0.001, false, this.sfx);
-        break;
-      case 'pickup':
-        [62, 69, 74].forEach((n, i) => this.tone('square', midi(n + 12), t + i * 0.07, 0.15, 0.06, 4000, 0.002, false, this.sfx));
-        break;
-      case 'newtool':
-        [50, 57, 62, 65, 69].forEach((n, i) => this.tone('square', midi(n + 12), t + i * 0.09, 0.35, 0.06, 4000, 0.002, false, this.sfx));
-        this.bell(midi(62), t + 0.4, 0.05, 2.5, this.sfx);
-        break;
-      case 'checkpoint':
-        this.bell(midi(74), t, 0.07, 2.5, this.sfx);
-        this.bell(midi(81), t + 0.15, 0.04, 2.0, this.sfx);
-        break;
-      case 'lost':
-        this.sweep('sawtooth', 400, 40, 0.8, 0.08);
-        this.glitchNoise(0.5);
-        break;
-      case 'screech':
-        this.sweep('sawtooth', 1800, 700, 0.18, 0.05);
-        this.sweep('square', 2400, 1200, 0.12, 0.03);
-        break;
-      case 'moan':
-        this.sweep('sawtooth', 110, 70, 0.9, 0.06);
-        break;
-      case 'die':
-        this.sweep('sawtooth', 300, 30, 0.6, 0.12);
-        this.noiseHit(t, 0.4, 0.5, 80, 1500);
-        this.glitchNoise(0.3);
-        break;
-      case 'burn':
-        this.noiseHit(t, 0.1, 0.06, 2000, 6000);
-        break;
-      case 'veil':
-        this.sweep('sine', 200, 1600, 0.9, 0.08);
-        this.glitchNoise(0.4);
-        break;
-      case 'death':
-        this.sweep('sawtooth', 220, 20, 1.6, 0.15);
-        this.glitchNoise(1.0);
-        break;
-      case 'glitch':
-        this.glitchNoise(0.2);
-        break;
-      case 'shot':
-        this.noiseHit(t, 0.25, 0.9, 100, 5000);
-        this.sweep('square', 300, 50, 0.2, 0.15);
-        break;
-      case 'greatbell':
-        this.bell(midi(38), t, 0.4, 9, this.sfx);
-        this.bell(midi(38), t + 2.2, 0.3, 9, this.sfx);
-        this.bell(midi(38), t + 4.4, 0.25, 9, this.sfx);
-        break;
-    }
-  }
-
-  // El Silbon's whistle: a rising do-re-mi-fa-sol-la-si.
-  whistle(vol, base, step = 0.32) {
-    if (!this.ctx) return;
-    [0, 2, 4, 5, 7, 9, 11].forEach((n, i) => this.tone('sine', midi(base + n), this.now + i * step, step * 1.3, vol, 4000, 0.05, true, this.sfx));
-  }
-
-  glitchNoise(dur) {
-    const t = this.now;
-    const n = Math.floor(dur / 0.03);
-    for (let i = 0; i < n; i++) {
-      const f = 80 + Math.random() * 3000;
-      this.tone('square', f, t + i * 0.03, 0.028, 0.03, 8000, 0.001, false, this.sfx);
-    }
+  // A close strike also cracks.
+  if (delay < 0.5) {
+    const c = noise(white);
+    const hp = filter('high', 1500);
+    const cg = gain();
+    slide(cg.gain, 0.5 * power, t, 0.0001, t + 0.35);
+    chain(c, hp, cg, amb);
+    run(c, t, t + 0.4);
   }
 }
 
-const audio = new AudioEngine();
+const EIGHTH = 60 / 72 / 2;
 
-// Procedural art. The world is mostly black, white and bare-earth brown; the only
-// bright colours are the child's yellow raincoat and crimson (eyes, blood, a
-// little stained glass).
+function startMusic() {
+  if (!ac || musicTimer) return;
+  musicStep = 0;
+  musicAt = now() + 0.1;
+  musicTimer = setInterval(() => {
+    while (musicAt < now() + 0.15) {
+      playStep(musicStep++, musicAt);
+      musicAt += EIGHTH;
+    }
+  }, 25);
+}
 
-const PAL = {
-  '.': null,
-  o: '#0c0c0c', // outline
-  k: '#000000', // void under the hood
-  Y: '#f2c230', // raincoat
-  y: '#a8780f', // raincoat shade
-  h: '#ffe07a', // raincoat highlight
-  s: '#c9c9c9', // pale skin
-  r: '#ff1a1a', // red eyes
-  R: '#7a0008', // dark red
-  c: '#c00010', // umbrella canopy
-  1: '#0e0e0e',
-  2: '#232323',
-  3: '#383838',
-  4: '#5a5a5a',
-  5: '#8c8c8c',
-  6: '#c4c4c4',
-  w: '#ffffff',
+function stopMusic() {
+  clearInterval(musicTimer);
+  musicTimer = 0;
+}
+
+function playStep(step, t) {
+  const bar = floor(step / 8) % 4;
+  const pos = step % 8;
+  const cycle = floor(step / 32);
+  const chord = CHORDS[bar];
+
+  if (!pos) {
+    for (const n of chord) {
+      tone(SAW, midi(n), t, EIGHTH * 8, 0.022, 900, 0.35);
+      tone(SAW, midi(n) * 1.004, t, EIGHTH * 8, 0.018, 900, 0.35);
+    }
+    if (!bar) bell(midi(38), t, 0.12, 5);
+  }
+
+  if (pos % 2 === 0) tone(SQUARE, midi(chord[0] - 12), t, EIGHTH * 1.6, 0.05, 500);
+
+  // Chiptune arpeggio (drops out every 4th cycle for breathing room).
+  if (cycle % 4 !== 3) tone(SQUARE, midi(chord[ARP[pos]] + 12), t, EIGHTH * 0.7, 0.018, 2500, 0.005);
+
+  // Lead melody plays every other cycle.
+  const m = MELODY[bar][pos];
+  if (m && cycle % 2) tone(SQUARE, midi(m), t, EIGHTH * 1.8, 0.035, 3000, 0.02, music, true);
+}
+
+function tone(wave, freq, t, dur, vol, cutoff = 2000, attack = 0.01, dest = music, vibrato) {
+  const o = osc(wave, freq);
+  if (vibrato) {
+    const lfo = osc(SINE, 5.5);
+    chain(lfo, gain(freq * 0.012), o.frequency);
+    run(lfo, t, t + dur + 0.1);
+  }
+  const f = filter('low', cutoff);
+  const g = gain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.linearRampToValueAtTime(vol, t + attack);
+  slide(g.gain, vol, t + max(attack, dur * 0.6), 0.0001, t + dur);
+  chain(o, f, g, dest);
+  run(o, t, t + dur + 0.05);
+}
+
+// Inharmonic partials of a cast bell: [frequency ratio, amplitude].
+const PARTIALS = [[0.5, 1], [1, 0.8], [1.19, 0.5], [1.5, 0.35], [2, 0.3], [2.74, 0.18], [3.76, 0.1]];
+
+function bell(freq, t, vol, len, dest = music) {
+  for (const [ratio, amp] of PARTIALS) {
+    const o = osc(SINE, freq * ratio);
+    const g = gain();
+    slide(g.gain, 0.0001, t, vol * amp, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + len / ratio ** 0.5);
+    chain(o, g, dest);
+    run(o, t, t + len + 0.1);
+  }
+}
+
+function noiseHit(t, dur, vol, lo, hi) {
+  const src = noise(white);
+  src.playbackRate.value = 0.5 + random();
+  const bp = filter('band');
+  slide(bp.frequency, hi, t, lo, t + dur);
+  bp.Q.value = 0.8;
+  const g = gain();
+  slide(g.gain, vol, t, 0.0001, t + dur);
+  chain(src, bp, g, sfx);
+  src.start(t, random() * 2);
+  src.stop(t + dur + 0.05);
+}
+
+function sweep(wave, f0, f1, dur, vol, t = now()) {
+  const o = osc(wave);
+  slide(o.frequency, f0, t, f1, t + dur);
+  const g = gain();
+  slide(g.gain, vol, t, 0.0001, t + dur);
+  chain(o, g, sfx);
+  run(o, t, t + dur + 0.05);
+}
+
+// A short square blip on the sfx bus.
+const blip = (freq, t, dur, vol, cutoff, attack) => tone(SQUARE, freq, t, dur, vol, cutoff, attack, sfx);
+const arpeggio = (notes, t, gap, dur) => notes.forEach((n, i) => blip(midi(n + 12), t + i * gap, dur, 0.06, 4000, 0.002));
+
+function glitchNoise(dur, t = now()) {
+  for (let i = 0; i < floor(dur / 0.03); i++) blip(80 + random() * 3000, t + i * 0.03, 0.028, 0.03, 8000, 0.001);
+}
+
+const SFX = {
+  jump: () => sweep(SQUARE, 220, 440, 0.1, 0.05),
+  land: (t) => noiseHit(t, 0.08, 0.15, 200, 600),
+  step: (t) => noiseHit(t, 0.04, 0.05, 300, 1200),
+  swing: (t) => noiseHit(t, 0.15, 0.25, 500, 3000),
+  poke: (t) => noiseHit(t, 0.08, 0.2, 800, 2500),
+  clang: (t) => {
+    blip(1250, t, 0.12, 0.06, 5000, 0.001);
+    blip(1870, t, 0.08, 0.04, 5000, 0.001);
+  },
+  crumble: (t) => {
+    noiseHit(t, 0.6, 0.6, 60, 900);
+    noiseHit(t + 0.1, 0.4, 0.3, 80, 600);
+  },
+  flesh: (t) => {
+    noiseHit(t, 0.18, 0.4, 120, 900);
+    sweep(SAW, 160, 60, 0.15, 0.08);
+  },
+  hurt: (t) => {
+    sweep(SQUARE, 600, 90, 0.35, 0.12);
+    noiseHit(t, 0.25, 0.4, 150, 1200);
+    glitchNoise(0.25);
+  },
+  drop: (t) => {
+    sweep(TRIANGLE, 900, 200, 0.25, 0.12);
+    blip(190, t + 0.05, 0.1, 0.05, 2000, 0.001);
+  },
+  pickup: (t) => arpeggio([62, 69, 74], t, 0.07, 0.15),
+  newtool: (t) => {
+    arpeggio([50, 57, 62, 65, 69], t, 0.09, 0.35);
+    bell(midi(62), t + 0.4, 0.05, 2.5, sfx);
+  },
+  checkpoint: (t) => {
+    bell(midi(74), t, 0.07, 2.5, sfx);
+    bell(midi(81), t + 0.15, 0.04, 2, sfx);
+  },
+  lost: () => {
+    sweep(SAW, 400, 40, 0.8, 0.08);
+    glitchNoise(0.5);
+  },
+  screech: () => {
+    sweep(SAW, 1800, 700, 0.18, 0.05);
+    sweep(SQUARE, 2400, 1200, 0.12, 0.03);
+  },
+  moan: () => sweep(SAW, 110, 70, 0.9, 0.06),
+  die: (t) => {
+    sweep(SAW, 300, 30, 0.6, 0.12);
+    noiseHit(t, 0.4, 0.5, 80, 1500);
+    glitchNoise(0.3);
+  },
+  burn: (t) => noiseHit(t, 0.1, 0.06, 2000, 6000),
+  veil: () => {
+    sweep(SINE, 200, 1600, 0.9, 0.08);
+    glitchNoise(0.4);
+  },
+  death: () => {
+    sweep(SAW, 220, 20, 1.6, 0.15);
+    glitchNoise(1);
+  },
+  glitch: () => glitchNoise(0.2),
+  shot: (t) => {
+    noiseHit(t, 0.25, 0.9, 100, 5000);
+    sweep(SQUARE, 300, 50, 0.2, 0.15);
+  },
+  greatbell: (t) => [0.4, 0.3, 0.25].forEach((v, i) => bell(midi(38), t + i * 2.2, v, 9, sfx)),
 };
 
-function canvas(w, h) {
+const sound = (name) => ac && SFX[name](now());
+
+// A run of sine notes with vibrato: El Silbon's whistle, and his death.
+const whistleNotes = (notes, base, gap, dur, vol, attack) =>
+  ac && notes.forEach((n, i) => tone(SINE, midi(base + n), now() + i * gap, dur, vol, 4000, attack, sfx, true));
+// A rising do-re-mi-fa-sol-la-si.
+const whistle = (vol, base, gap = 0.32) => whistleNotes([0, 2, 4, 5, 7, 9, 11], base, gap, gap * 1.3, vol, 0.05);
+
+// Procedural art. The world is strictly black & white; the only colours are the
+// child's yellow raincoat and crimson (eyes, blood, a little stained glass).
+
+// Palette: one char per colour, then its hex. Two hex digits are a grey.
+//   o outline, k black, 1-6 greys, s pale skin, w white
+//   Y/y/h raincoat, shade, highlight; r red eyes; R dark red; c umbrella canopy
+const PAL = {};
+for (const e of 'o0c k00 10e 223 338 45a 58c 6c4 sc9 wff a05 b0a d0b f10 i16 j18 l1a m1c n1e p22 q26 t2a u2e v33 x3a z4a A55 B6a C77 D8a E9a Fb0 Gd0 Hd8 Ie6 Yf2c230 ya8780f hffe07a rff1a1a R7a0008 cc00010 Jd9a520 K8a6410 L8a5a36 M2a1a10 Ne8c21a O8a7410 P6a0008 Q3a0004 S8a0010 Tb0000e U5a0008'.split(' ')) {
+  PAL[e[0]] = '#' + e.slice(1).padEnd(6, e.slice(1));
+}
+const grey = (v) => '#' + v.toString(16).padStart(2, '0').repeat(3);
+
+let textures; // the texture manager, set by makeArt
+let pen; // 2D context of the texture being drawn
+
+// Draw a new canvas texture; `frames` splits it into that many equal columns.
+function fromCanvas(key, w, h, draw, frames = 0) {
   const c = document.createElement('canvas');
   c.width = w;
   c.height = h;
-  return c;
+  pen = c.getContext('2d');
+  draw();
+  const tex = textures.addCanvas(key, c);
+  for (let i = 0; i < frames; i++) tex.add(i, 0, (i * w) / frames, 0, w / frames, h);
 }
 
-// Draw ASCII pixel art rows (padded to w) into ctx at (ox, oy).
-function drawRows(ctx, rows, w, ox = 0, oy = 0) {
-  rows.forEach((row, y) => {
-    const r = row.padEnd(w, '.').slice(0, w);
-    for (let x = 0; x < w; x++) {
-      const col = PAL[r[x]];
-      if (col) {
-        ctx.fillStyle = col;
-        ctx.fillRect(ox + x, oy + y, 1, 1);
-      }
-    }
-  });
+// Fill and stroke colour: a palette char, or any canvas style.
+const ink = (k) => (pen.fillStyle = pen.strokeStyle = PAL[k] || k);
+const box = (k, x, y, w, h) => {
+  ink(k);
+  pen.fillRect(x, y, w, h);
+};
+const circle = (x, y, r, stroke) => {
+  pen.beginPath();
+  pen.arc(x, y, r, 0, PI * 2);
+  stroke ? pen.stroke() : pen.fill();
+};
+const path = (d) => new Path2D(d);
+
+// Rect art. Groups are separated by spaces: a palette char, then 4 chars per
+// filled rect (x, y, w, h) in base 62: 0-9, a-z = 10-35, A-Z = 36-61.
+const b62 = (ch) => parseInt(ch, 36) + (ch > '9' && ch < 'a' ? 26 : 0);
+function rects(spec, ox = 0) {
+  for (const g of spec.split(' ')) {
+    ink(g[0]);
+    for (let i = 1; i < g.length; i += 4) pen.fillRect(ox + b62(g[i]), b62(g[i + 1]), b62(g[i + 2]), b62(g[i + 3]));
+  }
 }
 
-// Register a horizontal strip of ASCII frames as a texture with numeric frames.
-function sheet(scene, key, frames, w, h) {
-  const c = canvas(w * frames.length, h);
-  const ctx = c.getContext('2d');
-  frames.forEach((rows, i) => drawRows(ctx, rows, w, i * w, 0));
-  const tex = scene.textures.addCanvas(key, c);
-  frames.forEach((_, i) => tex.add(i, 0, i * w, 0, w, h));
-  return tex;
-}
-
-function fromCanvas(scene, key, w, h, draw) {
-  const c = canvas(w, h);
-  draw(c.getContext('2d'), w, h);
-  scene.textures.addCanvas(key, c);
+// Pixel art: one palette char per pixel, '.' is empty. Every picture starts with
+// a newline so pictures can be stacked with `+`; trailing empty pixels are left off.
+// `frames` are drawn side by side, `w` apart, and become numbered texture frames.
+function sheet(key, frames, w, h) {
+  fromCanvas(
+    key,
+    w * frames.length,
+    h,
+    () => frames.forEach((rows, i) => rows.split('\n').forEach((row, y) => [...row].forEach((ch, x) => PAL[ch] && box(ch, i * w + x, y - 1, 1, 1)))),
+    frames.length,
+  );
 }
 
 // Seeded RNG so the art is identical every run.
@@ -524,735 +448,453 @@ function rng(seed) {
   };
 }
 
-const CHILD_BODY = [
-  '................',
-  '.......oo.......',
-  '......oYYo......',
-  '.....oYhYYo.....',
-  '....oYhYYYYo....',
-  '....oYYYYYYYo...',
-  '...oYYYkkkkYo...',
-  '...oYYkkkkkkYo..',
-  '...oYYkkkkkkYo..',
-  '...oYYYkkkkYYo..',
-  '...oyYYYYYYYYo..',
-  '..oyYYhYYYYYYo..',
-  '..oyYYhYYYYYYYo.',
-  '..oyYYYYyYYYYYo.',
-  '.oyYYYYYyYYYYYo.',
-  '.oyYYYYYyYYYYYYo',
-  '.oyYYYYYyYYYYYYo',
-  'oyyYYYYYyYYYYYYo',
-  'oyyyyyyyyyyyyyyo',
-  '.oooooooooooooo.',
-];
-const LEGS = {
-  idle: ['.....os..so.....', '.....os..so.....', '.....os..so.....', '....oss..sso....'],
-  run1: ['....os....so....', '...os......so...', '...os.......so..', '..oss.......sso.'],
-  run2: ['.....os.so......', '.....os.so......', '.....os.so......', '....ossosso.....'],
-  run3: ['.....so..os.....', '....so....os....', '...so.......os..', '..sso.......oss.'],
-  jump: ['....os....so....', '...os......so...', '................', '................'],
-};
+const CHILD_BODY = `
 
-const SHADE_TOP = [
-  '................',
-  '......1111......',
-  '.....133331.....',
-  '....13333331....',
-  '....1333rr31....',
-  '....13333331....',
-  '.....133331.....',
-  '......1331......',
-  '....11133111....',
-  '...1333333331...',
-  '..133333333331..',
-  '..13.133331.31..',
-  '.13..133331..31.',
-  '.13..133331..31.',
-  '.13..133331..31.',
-  '13...133331...31',
-  '13...133331...31',
-  '3....133331....3',
-  '3....133331....3',
-  '.....133331.....',
-  '.....122221.....',
+.......oo
+......oYYo
+.....oYhYYo
+....oYhYYYYo
+....oYYYYYYYo
+...oYYYkkkkYo
+...oYYkkkkkkYo
+...oYYkkkkkkYo
+...oYYYkkkkYYo
+...oyYYYYYYYYo
+..oyYYhYYYYYYo
+..oyYYhYYYYYYYo
+..oyYYYYyYYYYYo
+.oyYYYYYyYYYYYo
+.oyYYYYYyYYYYYYo
+.oyYYYYYyYYYYYYo
+oyyYYYYYyYYYYYYo
+oyyyyyyyyyyyyyyo
+.oooooooooooooo`;
+// idle, run 1-3, jump
+const CHILD_LEGS = [
+  `
+.....os..so
+.....os..so
+.....os..so
+....oss..sso`,
+  `
+....os....so
+...os......so
+...os.......so
+..oss.......sso`,
+  `
+.....os.so
+.....os.so
+.....os.so
+....ossosso`,
+  `
+.....so..os
+....so....os
+...so.......os
+..sso.......oss`,
+  `
+....os....so
+...os......so`,
 ];
-const SHADE_LEGS_A = [
-  '.....12..21.....', '.....12..21.....', '.....12..21.....', '.....12..21.....',
-  '.....12..21.....', '....12....21....', '....12....21....', '....12....21....',
-  '...12......21...', '...12......21...', '..111......111..',
-];
-const SHADE_LEGS_B = [
-  '.....12..21.....', '.....12...21....', '....12....21....', '....12.....21...',
-  '...12......21...', '...12.......21..', '..12........21..', '..12.........21.',
-  '.12..........21.', '.12...........1.', '111..........11.',
+
+const SHADE_TOP = `
+
+......1111
+.....133331
+....13333331
+....1333rr31
+....13333331
+.....133331
+......1331
+....11133111
+...1333333331
+..133333333331
+..13.133331.31
+.13..133331..31
+.13..133331..31
+.13..133331..31
+13...133331...31
+13...133331...31
+3....133331....3
+3....133331....3
+.....133331
+.....122221`;
+const SHADE_LEGS = [
+  `
+.....12..21
+.....12..21
+.....12..21
+.....12..21
+.....12..21
+....12....21
+....12....21
+....12....21
+...12......21
+...12......21
+..111......111`,
+  `
+.....12..21
+.....12...21
+....12....21
+....12.....21
+...12......21
+...12.......21
+..12........21
+..12.........21
+.12..........21
+.12...........1
+111..........11`,
 ];
 
 const BAT = [
-  [
-    '1..............1',
-    '11............11',
-    '.11...1..1...11.',
-    '.1111.1111.1111.',
-    '..111111111111..',
-    '...111r11r111...',
-    '.....111111.....',
-    '......1111......',
-  ],
-  [
-    '................',
-    '................',
-    '......1..1......',
-    '......1111......',
-    '....11111111....',
-    '..1111r11r1111..',
-    '.1111.1111.1111.',
-    '11.....11.....11',
-  ],
+  `
+1..............1
+11............11
+.11...1..1...11
+.1111.1111.1111
+..111111111111
+...111r11r111
+.....111111
+......1111`,
+  `
+
+
+......1..1
+......1111
+....11111111
+..1111r11r1111
+.1111.1111.1111
+11.....11.....11`,
 ];
 
 const ICONS = {
-  flashlight: [
-    '................',
-    '................',
-    '................',
-    '..........wwo...',
-    '.ooooooooowwwo..',
-    '.o3444445o6wwo..',
-    '.o3455545o6wwo..',
-    '.o3444445o6wwo..',
-    '.ooooooooowwwo..',
-    '..........wwo...',
-  ],
-  crowbar: [
-    '.............44.',
-    '............5..4',
-    '...........5...4',
-    '..........5.....',
-    '.........5......',
-    '........5.......',
-    '.......5........',
-    '......4.........',
-    '.....4..........',
-    '....4...........',
-    '...4............',
-    '..4.............',
-    '.4R.............',
-    '.rR.............',
-  ],
-  umbrella: [
-    '.......1........',
-    '......1c1.......',
-    '.....1ccc1......',
-    '....1ccccc1.....',
-    '...1ccccccc1....',
-    '..1cccrccccc1...',
-    '.1ccccrcccccc1..',
-    '.1.1.1.5.1.1.1..',
-    '.......5........',
-    '.......5........',
-    '.......5........',
-    '.......5........',
-    '.....5.5........',
-    '......5.........',
-  ],
+  flashlight: `
+
+
+
+..........wwo
+.ooooooooowwwo
+.o3444445o6wwo
+.o3455545o6wwo
+.o3444445o6wwo
+.ooooooooowwwo
+..........wwo`,
+  crowbar: `
+.............44
+............5..4
+...........5...4
+..........5
+.........5
+........5
+.......5
+......4
+.....4
+....4
+...4
+..4
+.4R
+.rR`,
+  umbrella: `
+.......1
+......1c1
+.....1ccc1
+....1ccccc1
+...1ccccccc1
+..1cccrccccc1
+.1ccccrcccccc1
+.1.1.1.5.1.1.1
+.......5
+.......5
+.......5
+.......5
+.....5.5
+......5`,
+  revolver: `
+
+
+
+
+...4666666666
+..44555555556
+..4444444
+..455.3
+..445
+.445
+.44`,
 };
 
-ICONS.revolver = [
-  '................',
-  '................',
-  '................',
-  '................',
-  '...4666666666...',
-  '..44555555556...',
-  '..4444444.......',
-  '..455.3.........',
-  '..445...........',
-  '.445............',
-  '.44.............',
+const UMBRELLA_OPEN = `
+..........1111111111
+.......111cccccccccc111
+.....11cccccccrcccccccc11
+...11cccccccccrcccccccccc11
+..1cccccccccccrcccccccccccc1
+.1ccccccccccccrccccccccccccc1
+1cccccccccccccrcccccccccccccc1
+1.1..1..1..1..5..1..1..1..1.11
+..............5
+..............5
+..............5
+..............5`;
+
+const FLAME = [
+  `
+..w
+.www
+.wrw
+.wrw
+..r`,
+  `
+...w
+..ww
+.wwr
+.wrw
+..r`,
 ];
-const UMBRELLA_OPEN = [
-  '..........1111111111..........',
-  '.......111cccccccccc111.......',
-  '.....11cccccccrcccccccc11.....',
-  '...11cccccccccrcccccccccc11...',
-  '..1cccccccccccrcccccccccccc1..',
-  '.1ccccccccccccrccccccccccccc1.',
-  '1cccccccccccccrcccccccccccccc1',
-  '1.1..1..1..1..5..1..1..1..1.11',
-  '..............5...............',
-  '..............5...............',
-  '..............5...............',
-  '..............5...............',
+// full, empty
+const HEART = [
+  `
+.RR.RR
+RrrRrrR
+RrrrrrR
+.RrrrR
+..RrR
+...R`,
+  `
+.44.44
+4..4..4
+4.....4
+.4...4
+..4.4
+...4`,
 ];
 
-const TILE = { DIRT: 0, DIRT_TOP: 1, BEAM: 2, BG: 3, CAVE: 4, ROCK: 5, ROCK_TOP: 6, STONE: 7, STONE_TOP: 8, BLACK: 9 };
-// Rows at/above this are the abandoned church; rows below are cave rock.
-const CAVE_Y = 28;
+// Tile frames in the 'tiles' strip.
+const TILE_BRICK = 0;
+const TILE_BRICK_TOP = 1;
+const TILE_BEAM = 2;
+const TILE_BG = 3;
+const TILE_BG_ALT = 4;
+
+// Textures that are nothing but filled rects: key -> [width, height, rects].
+const RECT_ART = {
+  campesino: [16, 26, 'J5063 Y13e2 K5261 L5565 o9711 M6941 F4a88 53b16cb16 Lch12 z5i279i27 L5p219p21'], // straw hat, pale shirt, rolled trousers
+  bone: [8, 4, 'I116200246024'],
+  grave: [14, 18, 'o13cf3182 z24ae4262 B241c l66274862'],
+  cross: [12, 24, 'o404o05c4 A512n16a2'],
+  candle: [4, 10, 'H0248 E3218 w1113 k2012'], // the flame is a separate sprite
+  candelabra: [22, 30, 'ta82k6sa228i22426i426 H2024a127i024'],
+  shrine_lit: [24, 22, 'o2akc z3bib B3bi1 Rbe269g62 H5437b239h536'],
+  shrine: [24, 22, 'o2akc z3bib B3bi1 Rbe269g62 H5437b239h536 k6311c111i411'],
+  pillar: [20, 16, 'f00kg p20gg u403g id03g'],
+  px: [2, 2, 'w0022'],
+  blood: [3, 3, 'c0033 r0011'],
+  chunk: [4, 4, 'z0044 C0021'],
+};
 
 function makeArt(scene) {
+  textures = scene.textures;
+
   // Player frames: 0 idle, 1-3 run, 4 jump.
-  sheet(
-    scene,
-    'child',
-    [LEGS.idle, LEGS.run1, LEGS.run2, LEGS.run3, LEGS.jump].map((l) => [...CHILD_BODY, ...l]),
-    16,
-    24,
-  );
-  sheet(scene, 'shade', [[...SHADE_TOP, ...SHADE_LEGS_A], [...SHADE_TOP, ...SHADE_LEGS_B]], 16, 32);
-  sheet(scene, 'bat', BAT, 16, 8);
-  for (const [k, rows] of Object.entries(ICONS)) sheet(scene, `tool_${k}`, [rows], 16, 16);
+  sheet('child', CHILD_LEGS.map((l) => CHILD_BODY + l), 16, 24);
+  sheet('shade', SHADE_LEGS.map((l) => SHADE_TOP + l), 16, 32);
+  sheet('bat', BAT, 16, 8);
+  for (const k in ICONS) sheet('tool_' + k, [ICONS[k]], 16, 16);
+  sheet('umbrella_open', [UMBRELLA_OPEN], 30, 12);
+  sheet('flame', FLAME, 5, 5);
+  sheet('heart', HEART, 7, 6);
+  for (const k in RECT_ART) fromCanvas(k, RECT_ART[k][0], RECT_ART[k][1], () => rects(RECT_ART[k][2]));
 
   // El Silbon: a gaunt, too-tall man under a wide hat, a sack of bones on his back. Two walk frames.
-  fromCanvas(scene, 'silbon', 48, 56, (c) => {
-    [0, 24].forEach((ox, step) => {
-      const r = (col, x, y, w, h) => {
-        c.fillStyle = col;
-        c.fillRect(ox + x, y, w, h);
-      };
-      r('#5a5a5a', 1, 20, 5, 9); // sack
-      r('#2a2a2a', 2, 23, 1, 1);
-      r('#2a2a2a', 4, 26, 1, 1);
-      r('#2a2a2a', 8, 2, 8, 7); // hat
-      r('#5a5a5a', 8, 2, 8, 1);
-      r('#3a3a3a', 2, 9, 20, 2);
-      r('#6a6a6a', 2, 9, 20, 1);
-      r('#c9c9c9', 9, 11, 6, 6); // face
-      r('#000', 9, 11, 6, 2);
-      r('#8c8c8c', 10, 17, 4, 1);
-      r('#4a4a4a', 8, 18, 8, 16); // coat
-      r('#1c1c1c', 9, 18, 6, 16);
-      r('#2a2a2a', 6, 19, 2, 20); // arms
-      r('#2a2a2a', 16, 19, 2, 20);
-      r('#c9c9c9', 6, 39, 2, 2);
-      r('#c9c9c9', 16, 39, 2, 2);
-      r('#2a2a2a', 9 - step * 2, 34, 2, 22); // legs
-      r('#2a2a2a', 13 + step * 2, 34, 2, 22);
-      r('#5a5a5a', 8 - step * 2, 55, 4, 1);
-      r('#5a5a5a', 13 + step * 2, 55, 4, 1);
-    });
-  });
-  [0, 1].forEach((i) => scene.textures.get('silbon').add(i, 0, i * 24, 0, 24, 56));
-  // The campesino: yellow straw hat, pale shirt, rolled trousers.
-  fromCanvas(scene, 'campesino', 16, 26, (c) => {
-    const r = (col, x, y, w, h) => {
-      c.fillStyle = col;
-      c.fillRect(x, y, w, h);
-    };
-    r('#d9a520', 5, 0, 6, 3); // hat
-    r('#f2c230', 1, 3, 14, 2);
-    r('#8a6410', 5, 2, 6, 1);
-    r('#8a5a36', 5, 5, 6, 5); // face
-    r('#0c0c0c', 9, 7, 1, 1);
-    r('#2a1a10', 6, 9, 4, 1);
-    r('#b0b0b0', 4, 10, 8, 8); // shirt
-    r('#8c8c8c', 3, 11, 1, 6);
-    r('#8c8c8c', 12, 11, 1, 6);
-    r('#8a5a36', 12, 17, 1, 2);
-    r('#4a4a4a', 5, 18, 2, 7); // trousers
-    r('#4a4a4a', 9, 18, 2, 7);
-    r('#8a5a36', 5, 25, 2, 1);
-    r('#8a5a36', 9, 25, 2, 1);
-  });
-  fromCanvas(scene, 'bone', 8, 4, (c) => {
-    c.fillStyle = '#e6e6e6';
-    c.fillRect(1, 1, 6, 2);
-    c.fillRect(0, 0, 2, 4);
-    c.fillRect(6, 0, 2, 4);
-  });
-  sheet(scene, 'umbrella_open', [UMBRELLA_OPEN], 30, 12);
-
-  fromCanvas(scene, 'eyes', 8, 4, (c) => {
-    c.fillStyle = 'rgba(255,0,0,0.35)';
-    c.fillRect(0, 0, 8, 4);
-    c.fillStyle = PAL.r;
-    c.fillRect(1, 1, 2, 2);
-    c.fillRect(5, 1, 2, 2);
-  });
-  fromCanvas(scene, 'eyes_small', 6, 3, (c) => {
-    c.fillStyle = PAL.r;
-    c.fillRect(0, 1, 1, 1);
-    c.fillRect(3, 1, 1, 1);
-    c.fillStyle = 'rgba(255,0,0,0.3)';
-    c.fillRect(0, 0, 5, 3);
-  });
-
-  makeTiles(scene);
-  makeProps(scene);
-  makeLights(scene);
-  makeBackdrops(scene);
-  makeLogo(scene);
-  makeFont(scene);
-  makeFx(scene);
-}
-
-// Barren-earth terrain: packed dirt up top, cave rock below, ruin stone inside
-// the abandoned church. Each tile is 16px wide and drawn at ox on the sheet.
-function dirt(c, ox, rand, top) {
-  c.fillStyle = '#2c2117';
-  c.fillRect(ox, 0, 16, 16);
-  const clump = ['#35281a', '#241b12', '#3d2d1c', '#1d150e'];
-  for (let i = 0; i < 34; i++) {
-    c.fillStyle = clump[Math.floor(rand() * 4)];
-    c.fillRect(ox + Math.floor(rand() * 15), Math.floor(rand() * 16), 1 + Math.floor(rand() * 3), 1);
-  }
-  for (let i = 0; i < 6; i++) {
-    c.fillStyle = rand() > 0.5 ? '#5b4a30' : '#6d5a3c';
-    c.fillRect(ox + Math.floor(rand() * 15), Math.floor(rand() * 15), 1, 1);
-  }
-  if (top) {
-    c.fillStyle = '#6b573a';
-    c.fillRect(ox, 0, 16, 1);
-    c.fillStyle = '#4a3826';
-    c.fillRect(ox, 1, 16, 1);
-    for (let i = 0; i < 5; i++) {
-      c.fillStyle = rand() > 0.5 ? '#5d5a2a' : '#3f3d1c';
-      c.fillRect(ox + Math.floor(rand() * 15), 0, 1, 1 + Math.floor(rand() * 2));
-    }
-  }
-}
-
-function rock(c, ox, rand, top) {
-  c.fillStyle = '#1b1814';
-  c.fillRect(ox, 0, 16, 16);
-  for (let i = 0; i < 7; i++) {
-    c.fillStyle = rand() > 0.5 ? '#282320' : '#33302a';
-    const w = 4 + Math.floor(rand() * 9);
-    const h = 2 + Math.floor(rand() * 4);
-    c.fillRect(ox + Math.floor(rand() * (16 - w)), Math.floor(rand() * (16 - h)), w, h);
-  }
-  for (let i = 0; i < 5; i++) {
-    c.fillStyle = '#0f0d0b';
-    c.fillRect(ox + Math.floor(rand() * 16), Math.floor(rand() * 16), 1, 1 + Math.floor(rand() * 3));
-  }
-  if (top) {
-    c.fillStyle = '#4a463e';
-    c.fillRect(ox, 0, 16, 1);
-    c.fillStyle = '#2a2722';
-    c.fillRect(ox, 1, 16, 1);
-  }
-}
-
-function stone(c, ox, rand, top) {
-  c.fillStyle = '#1a1815';
-  c.fillRect(ox, 0, 16, 16);
-  const cols = ['#3a352e', '#2c2822', '#443d33'];
-  for (let i = 0; i < 18; i++) {
-    c.fillStyle = cols[Math.floor(rand() * 3)];
-    c.fillRect(ox + Math.floor(rand() * 15), Math.floor(rand() * 15), 1 + Math.floor(rand() * 3), 1);
-  }
-  c.fillStyle = '#0d0c0a';
-  c.fillRect(ox, 7, 16, 1);
-  c.fillRect(ox + 7, 0, 1, 7);
-  c.fillRect(ox + 3, 8, 1, 8);
-  if (top) {
-    c.fillStyle = '#69625a';
-    c.fillRect(ox, 0, 16, 1);
-    c.fillStyle = '#3a352e';
-    c.fillRect(ox, 1, 16, 1);
-  }
-}
-
-function wall(c, ox, rand, cave) {
-  c.fillStyle = cave ? '#12100d' : '#1a140d';
-  c.fillRect(ox, 0, 16, 16);
-  for (let i = 0; i < 14; i++) {
-    c.fillStyle = cave ? (rand() > 0.5 ? '#1a1712' : '#0d0b09') : rand() > 0.5 ? '#241c12' : '#0f0b07';
-    c.fillRect(ox + Math.floor(rand() * 15), Math.floor(rand() * 15), 1 + Math.floor(rand() * 2), 1);
-  }
-}
-
-function makeTiles(scene) {
-  const rand = rng(7);
-  fromCanvas(scene, 'tiles', 16 * 10, 16, (c) => {
-    dirt(c, 0, rand, false);
-    dirt(c, 16, rand, true);
-    // dry beam (one-way platform)
-    c.fillStyle = '#0c0c0c';
-    c.fillRect(32, 0, 16, 6);
-    c.fillStyle = '#3f3222';
-    c.fillRect(32, 0, 16, 4);
-    c.fillStyle = '#6a5535';
-    c.fillRect(32, 0, 16, 1);
-    c.fillStyle = '#2a2014';
-    c.fillRect(34, 2, 5, 1);
-    c.fillRect(42, 1, 4, 1);
-    c.fillStyle = '#1a1209';
-    c.fillRect(33, 4, 2, 5);
-    c.fillRect(45, 4, 2, 5);
-    wall(c, 48, rand, false);
-    wall(c, 64, rand, true);
-    rock(c, 80, rand, false);
-    rock(c, 96, rand, true);
-    stone(c, 112, rand, false);
-    stone(c, 128, rand, true);
-    // Buried rock: pure black, so the underside of the world reads as nothing.
-    c.fillStyle = '#000000';
-    c.fillRect(144, 0, 16, 16);
-  });
-
-  fromCanvas(scene, 'cracked', 16, 16, (c) => {
-    rock(c, 0, rng(7), false);
-    c.fillStyle = '#000';
-    [[8, 0], [7, 2], [8, 4], [6, 6], [7, 8], [9, 10], [8, 12], [10, 14], [9, 15]].forEach(([x, y]) => c.fillRect(x, y, 1, 2));
-    c.fillRect(3, 5, 4, 1);
-    c.fillRect(9, 10, 4, 1);
-    c.fillStyle = '#8a8a8a';
-    c.fillRect(9, 3, 1, 1);
-    c.fillRect(5, 9, 1, 1);
-    // yellow paint daubed across it: this stone can be broken
-    c.fillStyle = '#e8c21a';
-    for (let i = 0; i < 12; i++) c.fillRect(2 + i, 13 - i, 2, 2);
-    c.fillRect(1, 1, 3, 2);
-    c.fillRect(12, 13, 3, 2);
-    c.fillStyle = '#8a7410';
-    c.fillRect(4, 14, 1, 2);
-    c.fillRect(13, 4, 1, 3);
-  });
-
-  fromCanvas(scene, 'spikes', 16, 16, (c) => {
-    for (let i = 0; i < 4; i++) {
-      const x = i * 4;
-      for (let y = 0; y < 10; y++) {
-        const half = Math.floor((y + 1) / 5);
-        c.fillStyle = y < 2 ? '#cfc7b4' : '#6b6152';
-        c.fillRect(x + 2 - half, 6 + y, 1 + half * 2, 1);
+  fromCanvas(
+    'silbon',
+    48,
+    56,
+    () => {
+      for (const i of [0, 1]) {
+        // sack, hat, face, coat, arms, then the legs in mid-stride
+        rects('41k59 t2n114q118287 48281 x29k2 B29k1 s9b66 k9b62 5ah41 z8i8g m9i6g t6j2kgj2k s6D22gD22 ' + ['t9y2mdy2m 48T41dT41', 't7y2mfy2m 46T41fT41'][i], i * 24);
       }
-    }
-    c.fillStyle = '#7a0008';
-    c.fillRect(2, 8, 1, 2);
-    c.fillRect(10, 7, 1, 3);
-  });
-
-  fromCanvas(scene, 'veil', 32, 32, (c) => {
-    const r = rng(99);
-    c.fillStyle = '#000';
-    c.fillRect(0, 0, 32, 32);
-    for (let i = 0; i < 70; i++) {
-      const x = Math.floor(r() * 32);
-      const y = Math.floor(r() * 32);
-      const l = 2 + Math.floor(r() * 8);
-      c.fillStyle = r() > 0.85 ? '#5a5a5a' : '#1e1e1e';
-      c.fillRect(x, y, 1, l);
-    }
-    c.fillStyle = '#7a0008';
-    c.fillRect(12, 9, 1, 1);
-    c.fillRect(25, 22, 1, 1);
-  });
-}
-
-// A leafless llanos tree: recursive limbs, drawn thick and gnarled.
-function drawTree(c, x0, y0, len, w, r) {
-  const b = (x, y, a, l, w) => {
-    if (l < 5 || w < 1) return;
-    const x2 = x + Math.cos(a) * l;
-    const y2 = y + Math.sin(a) * l;
-    c.lineWidth = w;
-    c.beginPath();
-    c.moveTo(x, y);
-    c.lineTo(x2, y2);
-    c.stroke();
-    b(x2, y2, a - 0.35 - r() * 0.4, l * 0.72, w * 0.68);
-    b(x2, y2, a + 0.3 + r() * 0.4, l * 0.68, w * 0.68);
-  };
-  b(x0, y0, -Math.PI / 2, len, w);
-}
-
-function makeProps(scene) {
-  fromCanvas(scene, 'grave', 14, 18, (c) => {
-    c.fillStyle = '#0c0c0c';
-    c.fillRect(1, 3, 12, 15);
-    c.fillRect(3, 1, 8, 2);
-    c.fillStyle = '#4a4a4a';
-    c.fillRect(2, 4, 10, 14);
-    c.fillRect(4, 2, 6, 2);
-    c.fillStyle = '#6a6a6a';
-    c.fillRect(2, 4, 1, 12);
-    c.fillStyle = '#1a1a1a';
-    c.fillRect(6, 6, 2, 7);
-    c.fillRect(4, 8, 6, 2);
-  });
-  fromCanvas(scene, 'cross', 12, 24, (c) => {
-    c.fillStyle = '#0c0c0c';
-    c.fillRect(4, 0, 4, 24);
-    c.fillRect(0, 5, 12, 4);
-    c.fillStyle = '#555';
-    c.fillRect(5, 1, 2, 23);
-    c.fillRect(1, 6, 10, 2);
-  });
-  fromCanvas(scene, 'tree', 70, 112, (c) => {
-    c.strokeStyle = '#241a10';
-    c.lineCap = 'round';
-    drawTree(c, 35, 112, 38, 7, rng(3));
-  });
-  // The child's cabin: dark planks, a lit window and a stooped roof.
-  fromCanvas(scene, 'house', 60, 54, (c) => {
-    c.fillStyle = '#080604';
-    c.fillRect(6, 22, 48, 32);
-    c.fillStyle = '#241a10';
-    c.fillRect(8, 24, 44, 28);
-    c.fillStyle = '#160f08';
-    for (let y = 28; y < 52; y += 4) c.fillRect(8, y, 44, 1);
-    c.fillStyle = '#080604';
-    c.beginPath();
-    c.moveTo(0, 24);
-    c.lineTo(30, 4);
-    c.lineTo(60, 24);
-    c.closePath();
-    c.fill();
-    c.fillStyle = '#2c2218';
-    c.beginPath();
-    c.moveTo(5, 22);
-    c.lineTo(30, 8);
-    c.lineTo(55, 22);
-    c.closePath();
-    c.fill();
-    c.fillStyle = '#18110a';
-    for (let i = 1; i < 5; i++) c.fillRect(30 - i * 6, 8 + i * 3, i * 12, 1);
-    c.fillStyle = '#080604';
-    c.fillRect(22, 34, 14, 20);
-    c.fillStyle = '#3a2a18';
-    c.fillRect(23, 35, 12, 19);
-    c.fillStyle = '#f2c230';
-    c.fillRect(33, 44, 1, 1);
-    c.fillStyle = '#080604';
-    c.fillRect(39, 28, 14, 12);
-    c.fillStyle = '#e0a030';
-    c.fillRect(40, 29, 12, 10);
-    c.fillStyle = '#2a1a08';
-    c.fillRect(45, 29, 1, 10);
-    c.fillRect(40, 33, 12, 1);
-  });
-  fromCanvas(scene, 'fence', 32, 18, (c) => {
-    c.fillStyle = '#0c0a08';
-    c.fillRect(0, 4, 32, 2);
-    c.fillRect(0, 11, 32, 2);
-    for (const x of [2, 10, 18, 26]) {
-      c.fillRect(x, 0, 3, 18);
-      c.fillStyle = '#2a2018';
-      c.fillRect(x + 1, 0, 1, 18);
-      c.fillStyle = '#0c0a08';
-    }
-  });
-  fromCanvas(scene, 'scrub', 26, 12, (c) => {
-    const r = rng(17);
-    c.lineWidth = 1;
-    for (let i = 0; i < 16; i++) {
-      const x = 2 + r() * 22;
-      c.strokeStyle = r() > 0.5 ? '#4a4520' : '#33300f';
-      c.beginPath();
-      c.moveTo(x, 12);
-      c.lineTo(x + (r() - 0.5) * 8, 12 - 3 - r() * 8);
-      c.stroke();
-    }
-  });
-  fromCanvas(scene, 'stalagmite', 20, 24, (c) => {
-    const sp = (col, w) => {
-      c.fillStyle = col;
-      c.beginPath();
-      c.moveTo(10, 0);
-      c.lineTo(10 + w, 24);
-      c.lineTo(10 - w, 24);
-      c.closePath();
-      c.fill();
-    };
-    sp('#0c0a08', 9);
-    sp('#2f2a23', 7);
-    sp('#464039', 4);
-  });
-  // Candle (2 flame frames); flame drawn separately in makeFx.
-  fromCanvas(scene, 'candle', 4, 10, (c) => {
-    c.fillStyle = '#d8d8d8';
-    c.fillRect(0, 2, 4, 8);
-    c.fillStyle = '#9a9a9a';
-    c.fillRect(3, 2, 1, 8);
-    c.fillStyle = '#fff';
-    c.fillRect(1, 1, 1, 3);
-    c.fillStyle = '#000';
-    c.fillRect(2, 0, 1, 2);
-  });
-  fromCanvas(scene, 'candelabra', 22, 30, (c) => {
-    c.fillStyle = '#2a2a2a';
-    c.fillRect(10, 8, 2, 20);
-    c.fillRect(6, 28, 10, 2);
-    c.fillRect(2, 8, 18, 2);
-    c.fillRect(2, 4, 2, 6);
-    c.fillRect(18, 4, 2, 6);
-    c.fillStyle = '#d8d8d8';
-    c.fillRect(2, 0, 2, 4);
-    c.fillRect(10, 1, 2, 7);
-    c.fillRect(18, 0, 2, 4);
-  });
-  ['shrine', 'shrine_lit'].forEach((key, lit) =>
-    fromCanvas(scene, key, 24, 22, (c) => {
-      c.fillStyle = '#0c0c0c';
-      c.fillRect(2, 10, 20, 12);
-      c.fillStyle = '#4a4a4a';
-      c.fillRect(3, 11, 18, 11);
-      c.fillStyle = '#6a6a6a';
-      c.fillRect(3, 11, 18, 1);
-      c.fillStyle = '#7a0008';
-      c.fillRect(11, 14, 2, 6);
-      c.fillRect(9, 16, 6, 2);
-      c.fillStyle = '#d8d8d8';
-      c.fillRect(5, 4, 3, 7);
-      c.fillRect(11, 2, 3, 9);
-      c.fillRect(17, 5, 3, 6);
-      if (!lit) {
-        c.fillStyle = '#000';
-        c.fillRect(6, 3, 1, 1);
-        c.fillRect(12, 1, 1, 1);
-        c.fillRect(18, 4, 1, 1);
-      }
-    }),
+    },
+    2,
   );
-  fromCanvas(scene, 'window', 32, 72, (c) => {
-    const arch = () => {
-      c.beginPath();
-      c.moveTo(2, 72);
-      c.lineTo(2, 24);
-      c.quadraticCurveTo(2, 4, 16, 0);
-      c.quadraticCurveTo(30, 4, 30, 24);
-      c.lineTo(30, 72);
-      c.closePath();
+
+  fromCanvas('eyes', 8, 4, () => {
+    box('rgba(255,0,0,0.35)', 0, 0, 8, 4);
+    rects('r11225122');
+  });
+  fromCanvas('eyes_small', 6, 3, () => {
+    rects('r01113111');
+    box('rgba(255,0,0,0.3)', 0, 0, 5, 3);
+  });
+
+  makeTiles();
+  makeProps();
+  makeLights();
+  makeBackdrops();
+  makeLogo();
+  makeFont(scene);
+  makeFx();
+}
+
+// One 16px tile of brickwork at `ox`; `base` and `mortar` are grey levels.
+function brick(ox, rand, base, mortar, top) {
+  box(grey(mortar), ox, 0, 16, 16);
+  [0, 5, 10].forEach((y, i) => {
+    for (let x = i % 2 ? -4 : 0; x < 16; x += 8) {
+      const x0 = max(0, x + 1);
+      box(grey(base + floor(rand() * 14) - 7), ox + x0, y + 1, min(16, x + 8) - x0, i === 2 ? 5 : 4);
+    }
+  });
+  // speckle
+  for (let i = 0; i < 10; i++) box(grey(base + (rand() > 0.5 ? 14 : -10)), ox + floor(rand() * 16), floor(rand() * 16), 1, 1);
+  // rain-slick top edge
+  if (top) rects('E00g1 401g1 G3031b021', ox);
+}
+
+function makeTiles() {
+  const rand = rng(7);
+  fromCanvas('tiles', 80, 16, () => {
+    brick(0, rand, 0x3a, 0x14);
+    brick(16, rand, 0x3a, 0x14, true);
+    // wooden beam (one-way)
+    rects('o00g6 z00g4 C00g1 t2251a141 l1425d425', 32);
+    // background walls (dark, low contrast)
+    brick(48, rand, 0x1c, 0x0d);
+    brick(64, rand, 0x16, 0x0a);
+  });
+
+  fromCanvas('cracked', 16, 16, () => {
+    brick(0, rand, 0x4a, 0x1a);
+    rects('k801272128412661278129a128c12ae129f1235419a41 D93115911');
+    // yellow paint daubed across it: this stone can be broken
+    for (let i = 0; i < 12; i++) box('N', 2 + i, 13 - i, 2, 2);
+    rects('N1132cd32 O4e12d413');
+  });
+
+  fromCanvas('spikes', 16, 16, () => {
+    for (let i = 0; i < 4; i++) {
+      for (let y = 0; y < 10; y++) {
+        const half = floor((y + 1) / 5);
+        box(y < 2 ? 'I' : '5', i * 4 + 2 - half, 6 + y, 1 + half * 2, 1);
+      }
+    }
+    rects('R2812a713');
+  });
+
+  fromCanvas('veil', 32, 32, () => {
+    const r = rng(99);
+    box('k', 0, 0, 32, 32);
+    for (let i = 0; i < 70; i++) {
+      const x = floor(r() * 32);
+      const y = floor(r() * 32);
+      const l = 2 + floor(r() * 8);
+      box(r() > 0.85 ? '4' : 'n', x, y, 1, l);
+    }
+    rects('Rc911pm11');
+  });
+}
+
+function makeProps() {
+  fromCanvas('tree', 70, 110, () => {
+    ink('a');
+    pen.lineCap = 'round';
+    const r = rng(3);
+    const branch = (x, y, a, len, w) => {
+      if (len < 5 || w < 1) return;
+      const x2 = x + cos(a) * len;
+      const y2 = y + sin(a) * len;
+      pen.lineWidth = w;
+      pen.beginPath();
+      pen.moveTo(x, y);
+      pen.lineTo(x2, y2);
+      pen.stroke();
+      branch(x2, y2, a - 0.35 - r() * 0.4, len * 0.72, w * 0.68);
+      branch(x2, y2, a + 0.3 + r() * 0.4, len * 0.68, w * 0.68);
     };
-    c.fillStyle = '#0a0a0a';
-    arch();
-    c.fill();
-    c.save();
-    arch();
-    c.clip();
+    branch(35, 110, -PI / 2, 36, 7);
+  });
+  fromCanvas('window', 32, 72, () => {
+    const arch = path('M2 72L2 24Q2 4 16 0Q30 4 30 24L30 72Z');
+    ink('b');
+    pen.fill(arch);
+    pen.save();
+    pen.clip(arch);
     const r = rng(11);
     for (let y = 0; y < 72; y += 6) {
       for (let x = 4; x < 30; x += 6) {
         const p = r();
-        c.fillStyle = p > 0.88 ? '#6a0008' : p > 0.5 ? '#3a3a3a' : '#262626';
-        c.fillRect(x, y, 5, 5);
+        box(p > 0.88 ? 'P' : p > 0.5 ? 'x' : 'q', x, y, 5, 5);
       }
     }
-    c.fillStyle = '#0a0a0a';
-    c.fillRect(15, 0, 2, 72);
-    c.fillRect(0, 36, 32, 2);
-    c.restore();
-    c.strokeStyle = '#555';
-    c.lineWidth = 1;
-    arch();
-    c.stroke();
+    rects('bf02AfA2A0Aw2');
+    pen.restore();
+    ink('A');
+    pen.stroke(arch);
   });
-  fromCanvas(scene, 'rose', 64, 64, (c) => {
-    c.fillStyle = '#0a0a0a';
-    c.beginPath();
-    c.arc(32, 32, 31, 0, Math.PI * 2);
-    c.fill();
+  fromCanvas('rose', 64, 64, () => {
+    ink('b');
+    circle(32, 32, 31);
     for (let i = 0; i < 12; i++) {
-      const a = (i / 12) * Math.PI * 2;
-      c.fillStyle = i % 3 === 0 ? '#6a0008' : '#333';
-      c.beginPath();
-      c.arc(32 + Math.cos(a) * 19, 32 + Math.sin(a) * 19, 8, 0, Math.PI * 2);
-      c.fill();
+      const a = (i / 12) * PI * 2;
+      ink(i % 3 ? 'v' : 'P');
+      circle(32 + cos(a) * 19, 32 + sin(a) * 19, 8);
     }
-    c.fillStyle = '#7a0008';
-    c.beginPath();
-    c.arc(32, 32, 8, 0, Math.PI * 2);
-    c.fill();
-    c.strokeStyle = '#5a5a5a';
-    c.beginPath();
-    c.arc(32, 32, 30, 0, Math.PI * 2);
-    c.stroke();
+    ink('R');
+    circle(32, 32, 8);
+    ink('4');
+    circle(32, 32, 30, true);
   });
-  fromCanvas(scene, 'pillar', 20, 16, (c) => {
-    c.fillStyle = '#101010';
-    c.fillRect(0, 0, 20, 16);
-    c.fillStyle = '#222';
-    c.fillRect(2, 0, 16, 16);
-    c.fillStyle = '#2e2e2e';
-    c.fillRect(4, 0, 3, 16);
-    c.fillStyle = '#161616';
-    c.fillRect(13, 0, 3, 16);
+  fromCanvas('vault', 128, 48, () => {
+    ink('q');
+    pen.lineWidth = 4;
+    pen.stroke(path('M0 48Q0 6 64 0Q128 6 128 48'));
+    ink('j');
+    pen.lineWidth = 2;
+    pen.stroke(path('M12 48Q14 14 64 8Q114 14 116 48'));
   });
-  fromCanvas(scene, 'vault', 128, 48, (c) => {
-    c.strokeStyle = '#262626';
-    c.lineWidth = 4;
-    c.beginPath();
-    c.moveTo(0, 48);
-    c.quadraticCurveTo(0, 6, 64, 0);
-    c.quadraticCurveTo(128, 6, 128, 48);
-    c.stroke();
-    c.strokeStyle = '#181818';
-    c.lineWidth = 2;
-    c.beginPath();
-    c.moveTo(12, 48);
-    c.quadraticCurveTo(14, 14, 64, 8);
-    c.quadraticCurveTo(114, 14, 116, 48);
-    c.stroke();
-  });
-  fromCanvas(scene, 'bell', 48, 52, (c) => {
-    c.fillStyle = '#0c0c0c';
-    c.beginPath();
-    c.moveTo(20, 2);
-    c.lineTo(28, 2);
-    c.quadraticCurveTo(38, 4, 39, 22);
-    c.quadraticCurveTo(40, 38, 47, 46);
-    c.lineTo(1, 46);
-    c.quadraticCurveTo(8, 38, 9, 22);
-    c.quadraticCurveTo(10, 4, 20, 2);
-    c.fill();
-    c.fillStyle = '#6a6a6a';
-    c.beginPath();
-    c.moveTo(21, 4);
-    c.lineTo(27, 4);
-    c.quadraticCurveTo(36, 6, 37, 22);
-    c.quadraticCurveTo(38, 37, 44, 44);
-    c.lineTo(4, 44);
-    c.quadraticCurveTo(10, 37, 11, 22);
-    c.quadraticCurveTo(12, 6, 21, 4);
-    c.fill();
-    c.fillStyle = '#9a9a9a';
-    c.fillRect(15, 10, 3, 28);
-    c.fillStyle = '#3a3a3a';
-    c.fillRect(31, 10, 3, 30);
-    c.fillRect(6, 40, 36, 2);
-    c.fillStyle = '#1a1a1a';
-    c.fillRect(22, 44, 4, 8);
-    c.fillStyle = '#7a0008';
-    c.fillRect(20, 20, 8, 2);
-    c.fillRect(23, 16, 2, 10);
+  fromCanvas('bell', 48, 52, () => {
+    ink('o');
+    pen.fill(path('M20 2L28 2Q38 4 39 22Q40 38 47 46L1 46Q8 38 9 22Q10 4 20 2'));
+    ink('B');
+    pen.fill(path('M21 4L27 4Q36 6 37 22Q38 37 44 44L4 44Q10 37 11 22Q12 6 21 4'));
+    rects('Efa3s xva3u6EA2 lmI48 Rkk82ng2a');
   });
 }
 
-function makeLights(scene) {
-  fromCanvas(scene, 'light', 128, 128, (c) => {
-    const g = c.createRadialGradient(64, 64, 0, 64, 64, 64);
-    g.addColorStop(0, 'rgba(255,255,255,0.85)');
-    g.addColorStop(0.45, 'rgba(255,255,255,0.55)');
-    g.addColorStop(0.75, 'rgba(255,255,255,0.22)');
-    g.addColorStop(1, 'rgba(255,255,255,0)');
-    c.fillStyle = g;
-    c.fillRect(0, 0, 128, 128);
-  });
+// Fill the whole canvas with a gradient: stops are offset, colour, offset, colour...
+function gradient(g, ...stops) {
+  for (let i = 0; i < stops.length; i += 2) g.addColorStop(stops[i], PAL[stops[i + 1]] || stops[i + 1]);
+  return g;
+}
+
+function makeLights() {
+  fromCanvas('light', 128, 128, () =>
+    box(
+      gradient(pen.createRadialGradient(64, 64, 0, 64, 64, 64), 0, 'rgba(255,255,255,0.85)', 0.45, 'rgba(255,255,255,0.55)', 0.75, 'rgba(255,255,255,0.22)', 1, 'rgba(255,255,255,0)'),
+      0,
+      0,
+      128,
+      128,
+    ),
+  );
   // Flashlight cone, origin at left-middle, pointing right.
-  fromCanvas(scene, 'cone', 256, 160, (c) => {
-    const img = c.createImageData(256, 160);
+  fromCanvas('cone', 256, 160, () => {
+    const img = pen.createImageData(256, 160);
     const spread = 0.42; // radians half-angle
-    for (let y = 0; y < 160; y++) {
-      for (let x = 0; x < 256; x++) {
-        const dx = x;
-        const dy = y - 80;
-        const d = Math.hypot(dx, dy);
-        const a = Math.abs(Math.atan2(dy, dx + 0.001));
-        let v = 0;
-        if (a < spread && d < 256) {
-          const edge = 1 - Math.pow(a / spread, 3);
-          const fall = 1 - Math.pow(d / 256, 2.4);
-          v = Math.max(0, edge * fall);
-          if (d < 14) v = Math.max(v, 0.6 * (1 - d / 14));
-        }
-        const i = (y * 256 + x) * 4;
-        img.data[i] = img.data[i + 1] = img.data[i + 2] = 255;
-        img.data[i + 3] = Math.floor(v * 255);
+    img.data.fill(255);
+    for (let i = 0; i < 256 * 160; i++) {
+      const x = i % 256;
+      const dy = floor(i / 256) - 80;
+      const d = hypot(x, dy);
+      const a = abs(atan2(dy, x + 0.001));
+      let v = 0;
+      if (a < spread && d < 256) {
+        v = max(0, (1 - (a / spread) ** 3) * (1 - (d / 256) ** 2.4));
+        if (d < 14) v = max(v, 0.6 * (1 - d / 14));
       }
+      img.data[i * 4 + 3] = floor(v * 255);
     }
-    c.putImageData(img, 0, 0);
+    pen.putImageData(img, 0, 0);
   });
 }
 
@@ -1270,37 +912,32 @@ const GLYPHS = {
 };
 
 // Brush logo: slanted tapering strokes in the two blood reds, white rim.
-function makeLogo(scene) {
-  fromCanvas(scene, 'logo', 480, 150, (c) => {
-    c.lineJoin = 'round';
+function makeLogo() {
+  fromCanvas('logo', 480, 150, () => {
+    pen.lineJoin = 'round';
     const word = (text, x, y, u, sw) => {
-      const face = c.createLinearGradient(0, -sw / 2, 0, u * 6 + sw / 2);
-      face.addColorStop(0, '#ff1a1a');
-      face.addColorStop(1, '#c00010');
+      const face = gradient(pen.createLinearGradient(0, -sw / 2, 0, u * 6 + sw / 2), 0, 'r', 1, 'c');
       // drop shadow, white rim, dark keyline, blood-red face
       [
-        [8, '#000', 4],
-        [8, '#fff', 0],
-        [3, '#000', 0],
+        [8, 'k', 4],
+        [8, 'w', 0],
+        [3, 'k', 0],
         [0, face, 0],
       ].forEach(([lw, style, off]) => {
-        c.lineWidth = lw;
-        c.strokeStyle = c.fillStyle = style;
+        pen.lineWidth = lw;
+        ink(style);
         [...text].forEach((ch, i) => {
-          c.setTransform(1, 0, -0.3, 1, x + i * (u * 5 + sw) + off, y + off);
+          pen.setTransform(1, 0, -0.3, 1, x + i * (u * 5 + sw) + off, y + off);
           const g = GLYPHS[ch];
           for (let k = 0; k < g.length; k += 4) {
             const [ax, ay, bx, by] = g.slice(k, k + 4).map((v) => v * u);
-            const s = sw / 2 / Math.hypot(bx - ax, by - ay);
+            const s = sw / 2 / hypot(bx - ax, by - ay);
             const dx = (bx - ax) * s;
             const dy = (by - ay) * s;
-            c.beginPath();
-            c.moveTo(ax - dx - dy, ay - dy + dx);
-            c.lineTo(ax - dx + dy, ay - dy - dx);
-            c.lineTo(bx + (dx + dy) * 0.4, by + (dy - dx) * 0.4);
-            c.lineTo(bx + (dx - dy) * 0.4, by + (dy + dx) * 0.4);
-            c.closePath();
-            lw ? c.stroke() : c.fill();
+            const stroke = path(
+              `M${ax - dx - dy} ${ay - dy + dx}L${ax - dx + dy} ${ay - dy - dx}L${bx + (dx + dy) * 0.4} ${by + (dy - dx) * 0.4}L${bx + (dx - dy) * 0.4} ${by + (dy + dx) * 0.4}Z`,
+            );
+            lw ? pen.stroke(stroke) : pen.fill(stroke);
           }
         });
       });
@@ -1316,10 +953,10 @@ const FONT =
   'ehhvhhhuhhuhhuehgggheuhhhhhuvgguggvvggugggehgjhhehhhvhhhe44444e1111hhehikokihggggggvhrrhhhhhppljjhehhhhheuhhugggehhhliduhhukihehge1hev444444hhhhhhehhhhaa4hhhhrrhhha4ahhhha4444v1248gvehjlphe4c4444eeh168gveh161he26aiv22vgu11heegguhhev124444ehhehheehhf11e000008800004484444404eh124048kk8lid000e000044044011248gg248884284222480000000ehpljhh40444444048ghe';
 
 function makeFont(scene) {
-  fromCanvas(scene, 'font', FONT_CHARS.length * 8, 8, (c) => {
-    c.fillStyle = '#fff';
+  fromCanvas('font', FONT_CHARS.length * 8, 8, () => {
+    ink('w');
     [...FONT].forEach((d, i) => {
-      for (let b = 0; b < 5; b++) if ((parseInt(d, 32) << b) & 16) c.fillRect(((i / 7) | 0) * 8 + b, i % 7, 2, 1);
+      for (let b = 0; b < 5; b++) if ((parseInt(d, 32) << b) & 16) pen.fillRect(floor(i / 7) * 8 + b, i % 7, 2, 1);
     });
   });
   scene.cache.bitmapFont.add('font', Phaser.GameObjects.RetroFont.Parse(scene, { image: 'font', width: 8, height: 8, chars: FONT_CHARS }));
@@ -1329,230 +966,100 @@ function label(scene, x, y, text, tint = 0xffffff, scale = 1) {
   return scene.add.bitmapText(x, y, 'font', text, 8 * scale, 1).setOrigin(0.5).setTint(tint);
 }
 
-function makeBackdrops(scene) {
-  fromCanvas(scene, 'sky', 640, 480, (c) => {
-    const g = c.createLinearGradient(0, 0, 0, 480);
-    g.addColorStop(0, '#04050a');
-    g.addColorStop(0.55, '#141118');
-    g.addColorStop(0.8, '#2a1d19');
-    g.addColorStop(1, '#3c2b1c');
-    c.fillStyle = g;
-    c.fillRect(0, 0, 640, 480);
+function makeBackdrops() {
+  fromCanvas('sky', 640, 480, () => {
+    box(gradient(pen.createLinearGradient(0, 0, 0, 480), 0, 'a', 0.6, 'i', 1, 'q'), 0, 0, 640, 480);
     const r = rng(21);
-    for (let i = 0; i < 56; i++) {
+    for (let i = 0; i < 60; i++) {
       const x = r() * 700 - 30;
-      const y = r() * 260;
+      const y = r() * 270;
       const w = 60 + r() * 140;
-      c.fillStyle = `rgba(${r() > 0.5 ? '34,30,30' : '16,14,18'},0.5)`;
-      c.beginPath();
-      c.ellipse(x, y, w / 2, 8 + r() * 14, 0, 0, Math.PI * 2);
-      c.fill();
+      ink(`rgba(${r() > 0.5 ? '40,40,40' : '20,20,20'},0.5)`);
+      pen.beginPath();
+      pen.ellipse(x, y, w / 2, 8 + r() * 14, 0, 0, PI * 2);
+      pen.fill();
     }
   });
 
-  // Far savanna: flat horizon, a ragged treeline and one church ruin.
-  fromCanvas(scene, 'hills', 640, 480, (c) => {
+  fromCanvas('spires', 640, 480, () => {
     const r = rng(5);
-    c.fillStyle = '#0a0908';
-    c.fillRect(0, 340, 640, 140);
-    c.beginPath();
-    c.moveTo(0, 352);
-    for (let x = 0; x <= 640; x += 32) c.lineTo(x, 340 - r() * 10);
-    c.lineTo(640, 480);
-    c.lineTo(0, 480);
-    c.closePath();
-    c.fill();
-    for (let x = 8; x < 640; x += 26 + r() * 50) {
-      c.fillStyle = '#060605';
-      const h = 18 + r() * 26;
-      c.fillRect(x, 340 - h, 2, h + 6);
-      c.beginPath();
-      c.ellipse(x + 1, 340 - h, 9 + r() * 8, 5 + r() * 5, 0, 0, Math.PI * 2);
-      c.fill();
+    for (let x = 0; x < 640; ) {
+      const w = 30 + r() * 60;
+      const h = 124 + r() * 140;
+      const top = 480 - h;
+      box('d', x, top, w, h);
+      // spire
+      pen.fill(path(`M${x + w * 0.2} ${top}L${x + w / 2} ${top - 30 - r() * 60}L${x + w * 0.8} ${top}`));
+      // pinnacles
+      pen.fillRect(x, top - 10, 3, 10);
+      pen.fillRect(x + w - 3, top - 10, 3, 10);
+      // dim windows
+      if (r() > 0.4) {
+        ink(r() > 0.8 ? 'Q' : 'm');
+        circle(x + w / 2, top + 30, 6);
+      }
+      x += w + r() * 20;
     }
-    c.fillStyle = '#0d0c0b';
-    c.fillRect(150, 296, 30, 44);
-    c.beginPath();
-    c.moveTo(144, 296);
-    c.lineTo(165, 272);
-    c.lineTo(186, 296);
-    c.closePath();
-    c.fill();
-    c.fillRect(146, 288, 38, 3);
-    c.fillStyle = '#2a0008';
-    c.fillRect(162, 312, 6, 12);
   });
 
-  // Nearer grove of dry trees and scrub, darker than the horizon.
-  fromCanvas(scene, 'grove', 640, 480, (c) => {
+  fromCanvas('buttress', 640, 480, () => {
     const r = rng(8);
-    c.fillStyle = '#050504';
-    c.fillRect(0, 430, 640, 50);
-    for (let x = -10; x < 660; x += 80 + r() * 90) drawTree(c, x, 440, 40 + r() * 40, 4 + r() * 3, r);
-    c.lineWidth = 1;
-    for (let x = 0; x < 640; x += 5 + r() * 9) {
-      c.strokeStyle = '#0b0a08';
-      c.beginPath();
-      c.moveTo(x, 442);
-      c.lineTo(x + (r() - 0.5) * 10, 442 - 8 - r() * 16);
-      c.stroke();
-    }
-  });
-
-  // Far forest: pale trunks drowned in fog, so the woods read as deep and cold.
-  fromCanvas(scene, 'forestfar', 640, 480, (c) => {
-    const r = rng(41);
-    const g = c.createLinearGradient(0, 0, 0, 480);
-    g.addColorStop(0, 'rgba(44,48,58,0)');
-    g.addColorStop(0.55, 'rgba(52,56,66,0.28)');
-    g.addColorStop(1, 'rgba(66,70,80,0.5)');
-    c.fillStyle = g;
-    c.fillRect(0, 0, 640, 480);
-    for (let x = 0; x < 640; x += 10 + r() * 16) {
-      const w = 2 + r() * 4;
-      const h = 150 + r() * 240;
-      c.fillStyle = `rgba(${(78 + r() * 22) | 0},${(82 + r() * 22) | 0},${(92 + r() * 22) | 0},0.55)`;
-      c.fillRect(x, 480 - h, w, h);
-      for (let i = 0; i < 3; i++) c.fillRect(x - w, 480 - h + i * 22, w * 3, 1);
-    }
-  });
-
-  // Mid forest: tall dark trunks with roots and hanging limbs.
-  fromCanvas(scene, 'forestmid', 640, 480, (c) => {
-    const r = rng(53);
-    for (let x = -20; x < 660; x += 62 + r() * 70) {
-      const w = 10 + r() * 16;
-      c.fillStyle = '#0b0b0e';
-      c.fillRect(x, 0, w, 480);
-      c.fillStyle = '#15151a';
-      c.fillRect(x + 2, 0, 2, 480);
-      c.beginPath();
-      c.moveTo(x, 480);
-      c.lineTo(x - 9, 480);
-      c.lineTo(x + 2, 436);
-      c.closePath();
-      c.fill();
-      c.beginPath();
-      c.moveTo(x + w, 480);
-      c.lineTo(x + w + 9, 480);
-      c.lineTo(x + w - 2, 436);
-      c.closePath();
-      c.fill();
-      for (let i = 0; i < 4; i++) c.fillRect(x + r() * w, 0, 2, 40 + r() * 90);
-    }
-    c.fillStyle = '#0b0b0e';
-    c.fillRect(0, 0, 640, 12);
-  });
-
-  // Foreground trunks that sweep in front of the camera (Blasphemous columns).
-  fromCanvas(scene, 'foretrees', 320, 480, (c) => {
-    const r = rng(67);
-    for (let i = 0; i < 2; i++) {
-      const x = 40 + i * 180 + r() * 40;
-      const w = 18 + r() * 16;
-      c.fillStyle = '#030303';
-      c.fillRect(x, 0, w, 480);
-      for (let j = 0; j < 7; j++) {
-        const y = 20 + r() * 300;
-        const len = 40 + r() * 90;
-        c.fillRect(r() > 0.5 ? x + w : x - len, y, len, 4 + r() * 4);
-      }
-      for (let j = 0; j < 9; j++) {
-        c.beginPath();
-        c.arc(x + w / 2 + (r() - 0.5) * 90, 12 + r() * 44, 10 + r() * 20, 0, Math.PI * 2);
-        c.fill();
-      }
+    box('a', 0, 420, 640, 60);
+    for (let x = 0; x < 640; x += 160) {
+      const h = 140 + r() * 60;
+      const y = 480 - h;
+      pen.fillRect(x + 10, y, 26, h);
+      // pinnacle, then the flying arch
+      pen.fill(path(`M${x + 23} ${y - 40}L${x + 10} ${y}L${x + 36} ${y}`));
+      pen.fill(path(`M${x + 36} ${y + 20}Q${x + 100} ${y + 10} ${x + 150} 420L${x + 140} 420Q${x + 95} ${y + 30} ${x + 36} ${y + 34}`));
     }
   });
 }
 
-function makeFx(scene) {
-  fromCanvas(scene, 'drop', 4, 14, (c) => {
-    c.strokeStyle = 'rgba(220,220,220,0.9)';
-    c.lineWidth = 1;
-    c.beginPath();
-    c.moveTo(3.5, 0);
-    c.lineTo(0.5, 14);
-    c.stroke();
-  });
-  fromCanvas(scene, 'px', 2, 2, (c) => {
-    c.fillStyle = '#fff';
-    c.fillRect(0, 0, 2, 2);
+function makeFx() {
+  fromCanvas('drop', 4, 14, () => {
+    ink('rgba(220,220,220,0.9)');
+    pen.beginPath();
+    pen.moveTo(3.5, 0);
+    pen.lineTo(0.5, 14);
+    pen.stroke();
   });
   // Free-aim crosshair.
-  fromCanvas(scene, 'reticle', 11, 11, (c) => {
-    c.strokeStyle = 'rgba(255,255,255,0.9)';
-    c.lineWidth = 1;
-    c.beginPath();
-    c.arc(5, 5, 4, 0, Math.PI * 2);
-    c.stroke();
-    c.fillStyle = '#ff1a1a';
-    c.fillRect(5, 0, 1, 2);
-    c.fillRect(5, 9, 1, 2);
-    c.fillRect(0, 5, 2, 1);
-    c.fillRect(9, 5, 2, 1);
+  fromCanvas('reticle', 11, 11, () => {
+    ink('rgba(255,255,255,0.9)');
+    circle(5, 5, 4, true);
+    rects('r5012591205219521');
   });
-  fromCanvas(scene, 'blood', 3, 3, (c) => {
-    c.fillStyle = '#c00010';
-    c.fillRect(0, 0, 3, 3);
-    c.fillStyle = '#ff1a1a';
-    c.fillRect(0, 0, 1, 1);
-  });
-  [0, 1, 2].forEach((v) =>
-    fromCanvas(scene, `splat${v}`, 14, 4, (c) => {
+  for (const v of [0, 1, 2]) {
+    fromCanvas('splat' + v, 14, 4, () => {
       const r = rng(40 + v);
-      c.fillStyle = '#8a0010';
-      c.fillRect(2, 2, 10, 2);
-      for (let i = 0; i < 9; i++) {
-        c.fillStyle = r() > 0.5 ? '#b0000e' : '#5a0008';
-        c.fillRect(Math.floor(r() * 14), 1 + Math.floor(r() * 3), 1 + Math.floor(r() * 3), 1);
-      }
-    }),
-  );
-  fromCanvas(scene, 'chunk', 4, 4, (c) => {
-    c.fillStyle = '#4a4a4a';
-    c.fillRect(0, 0, 4, 4);
-    c.fillStyle = '#777';
-    c.fillRect(0, 0, 2, 1);
+      rects('S22a2');
+      for (let i = 0; i < 9; i++) box(r() > 0.5 ? 'T' : 'U', floor(r() * 14), 1 + floor(r() * 3), 1 + floor(r() * 3), 1);
+    });
+  }
+  fromCanvas('smoke', 6, 6, () => {
+    ink('rgba(180,180,180,0.6)');
+    circle(3, 3, 3);
   });
-  fromCanvas(scene, 'smoke', 6, 6, (c) => {
-    c.fillStyle = 'rgba(180,180,180,0.6)';
-    c.beginPath();
-    c.arc(3, 3, 3, 0, Math.PI * 2);
-    c.fill();
-  });
-  sheet(
-    scene,
-    'flame',
-    [
-      ['..w..', '.www.', '.wrw.', '.wrw.', '..r..'],
-      ['...w.', '..ww.', '.wwr.', '.wrw.', '..r..'],
-    ],
-    5,
-    5,
-  );
-  const heart = ['.RR.RR.', 'RrrRrrR', 'RrrrrrR', '.RrrrR.', '..RrR..', '...R...'];
-  const empty = ['.44.44.', '4..4..4', '4.....4', '.4...4.', '..4.4..', '...4...'];
-  sheet(scene, 'heart', [heart, empty], 7, 6);
 }
 
 // The whole map, built from rectangles on a tile grid.
 //
 // Route (each gate needs a tool):
-//   Llanos ──veil(flashlight)──▶ cave mouth ──climb the cerro──▶ Gallery (crowbar)
-//   Hillside ──cracked rock(crowbar)──▶ Crypt ──veil──▶ Umbrella ──shaft──▶ Hillside
-//   Gallery ──chasm(glide: umbrella)──▶ Church ──cracked wall──▶ ──veil──▶ Great Bell
+//   Graveyard ──veil(flashlight)──▶ Nave ──climb──▶ Gallery (crowbar)
+//   Nave floor ──cracked stone(crowbar)──▶ Crypt ──veil──▶ Umbrella ──shaft──▶ Nave
+//   Gallery ──chasm(glide: umbrella)──▶ Belfry ──cracked wall──▶ ──veil──▶ Great Bell
 //
 // Entity coordinates are in tiles; `y` is the row the entity stands on
 // (the top of the ground under it), so its feet are at y * 16.
 
 const T = 16;
-const OX = 96; // tiles of intro forest prepended before the old world
-const BASE_W = 192; // width of the world before the forest was prepended
-const W = BASE_W + OX;
+const W = 192;
 const ARENA_X = 150; // first column of the ruins where El Silbon is fought
 const ARENA_Y = 30;
 const H = 40;
+const SCREEN_W = 640;
+const SCREEN_H = 480;
 
 const EMPTY = 0;
 const SOLID = 1;
@@ -1566,52 +1073,52 @@ function buildWorld() {
   const fill = (x1, y1, x2, y2, v = SOLID, g = grid) => {
     for (let y = y1; y <= y2; y++) for (let x = x1; x <= x2; x++) g[y][x] = v;
   };
+  const inside = (x1, y1, x2, y2) => fill(x1, y1, x2, y2, 1, interior);
   const beam = (x1, x2, y) => fill(x1, y, x2, y, BEAM);
-  const e = (type, x, y, extra = {}) => ents.push({ type, x, y, ...extra });
+  // One entity; `a` and `b` are whatever that type needs (see buildEntities).
+  const one = (type, x, y, a, b) => ents.push({ type, x, y, a, b });
+  // Plain entities of one type: e(type, x, y, x, y, ...).
+  const e = (type, ...at) => {
+    for (let i = 0; i < at.length; i += 2) one(type, at[i], at[i + 1]);
+  };
   const cracked = (x1, y1, x2, y2) => {
     fill(x1, y1, x2, y2, EMPTY);
-    for (let y = y1; y <= y2; y++) for (let x = x1; x <= x2; x++) e('cracked', x, y);
+    for (let y = y1; y <= y2; y++) for (let x = x1; x <= x2; x++) one('cracked', x, y);
   };
-  const spikes = (x1, x2, y, abyss = false) => {
-    for (let x = x1; x <= x2; x++) e('spikes', x, y, { abyss });
+  const spikes = (x1, x2, y, abyss) => {
+    for (let x = x1; x <= x2; x++) one('spikes', x, y, abyss);
   };
 
-  // World shell (the forest is prepended later, so this is the base world)
+  // World shell
   fill(0, 0, 1, H - 1);
-  fill(BASE_W - 2, 0, BASE_W - 1, H - 1);
-  fill(0, H - 2, BASE_W - 1, H - 1);
+  fill(W - 2, 0, W - 1, H - 1);
+  fill(0, H - 2, W - 1, H - 1);
   fill(ARENA_X - 2, 0, ARENA_X - 1, H - 1); // belfry's outer wall; the ruins lie beyond it
-  fill(ARENA_X, ARENA_Y, BASE_W - 3, H - 3);
+  fill(ARENA_X, ARENA_Y, W - 3, H - 3);
 
-  // Llanos flatlands: dry earth, leafless trees and low scrub.
+  // Graveyard (the child starts at 5, 26)
   fill(2, 26, 33, 37);
   fill(12, 25, 16, 25);
   fill(24, 24, 27, 25);
-  e('player', 5, 26);
-  e('shrine', 8, 26, { lit: true });
+  one('shrine', 8, 26, true); // already lit
   e('tree', 3, 26);
-  e('tree', 12, 25);
-  e('tree', 21, 26, { flip: true });
-  e('tree', 29, 26, { flip: true });
-  e('scrub', 10, 26);
-  e('scrub', 18, 26);
-  e('scrub', 24, 24);
-  e('scrub', 31, 26);
-  e('grave', 14, 25);
-  e('cross', 25, 24);
+  one('tree', 21, 26, true); // flipped
+  e('grave', 10, 26, 14, 25, 18, 26, 29, 26);
+  e('cross', 25, 24, 31, 26);
   e('shade', 20, 26);
-  e('candle', 11, 26);
-  e('candle', 30, 26);
+  e('candle', 11, 26, 30, 26);
 
-  // Cave mouth into the cerro, sealed by a veiled door.
+  // Cathedral facade with a veiled door.
   fill(34, 0, 35, 20);
   fill(34, 26, 35, 37);
-  e('veil', 34, 21, { w: 2, h: 5 });
+  one('veil', 34, 21, 2, 5); // width, height
 
-  // Open hillside: the long climb up the cerro, sky and grove behind.
-  fill(36, 26, 89, 27); // hillside floor (the crypt lies below)
+  // Nave
+  fill(36, 0, 89, 3); // vaulted ceiling
+  fill(36, 26, 89, 27); // floor (the crypt lies below)
   fill(88, 0, 89, 6); // right wall, upper
   fill(88, 11, 89, 37); // right wall, lower (opening at rows 7-10 onto the chasm)
+  inside(36, 4, 87, 25);
 
   beam(40, 45, 23);
   beam(49, 53, 20);
@@ -1620,27 +1127,16 @@ function buildWorld() {
   beam(70, 87, 11); // gallery
 
   e('shrine', 38, 26);
-  e('tool', 78, 11, { tool: 'crowbar' });
+  one('tool', 78, 11, 'crowbar');
   cracked(44, 26, 46, 27); // way down into the crypt
-  e('tree', 40, 26);
-  e('tree', 52, 26, { flip: true });
-  e('tree', 68, 26);
-  e('tree', 86, 11);
-  e('stalagmite', 37, 26);
-  e('scrub', 43, 23);
-  e('scrub', 51, 20);
-  e('scrub', 58, 17);
-  e('scrub', 65, 14);
-  e('scrub', 75, 11);
-  e('scrub', 83, 11);
-  e('scrub', 50, 26);
-  e('scrub', 84, 26);
-  e('candle', 71, 11);
-  e('candle', 86, 11);
-  e('shade', 58, 26);
-  e('shade', 78, 26);
-  e('bat', 55, 12);
-  e('bat', 74, 7);
+  e('shade', 58, 26, 78, 26);
+  e('bat', 55, 12, 74, 7);
+  e('candelabra', 41, 26, 62, 26, 72, 26);
+  e('candle', 71, 11, 86, 11);
+  e('pillar', 39, 4, 48, 4, 57, 4, 66, 4, 75, 4, 84, 4);
+  e('window', 43, 5, 52, 5, 70, 5, 79, 5);
+  e('rose', 61, 5);
+  e('vault', 39, 4, 48, 4, 57, 4, 66, 4, 75, 4);
 
   // Crypt
   fill(36, 36, 87, 37); // crypt floor
@@ -1648,20 +1144,15 @@ function buildWorld() {
   fill(67, 36, 71, 37, EMPTY); // spike pit
   spikes(55, 59, 38);
   spikes(67, 71, 38);
-  fill(36, 28, 87, 37, 1, interior);
-  e('veil', 62, 28, { w: 2, h: 8 });
+  inside(36, 28, 87, 37);
+  one('veil', 62, 28, 2, 8);
   e('shrine', 49, 36);
-  e('tool', 82, 36, { tool: 'umbrella' });
-  e('shade', 52, 36);
-  e('shade', 77, 36);
+  one('tool', 82, 36, 'umbrella');
+  e('shade', 52, 36, 77, 36);
   e('bat', 75, 31);
-  e('candle', 40, 36);
-  e('candle', 65, 36);
-  e('candle', 80, 36);
-  e('stalagmite', 38, 36);
-  e('stalagmite', 44, 36);
-  e('stalagmite', 74, 36);
-  for (const x of [40, 47, 54, 63, 70, 79, 85]) e('stalactite', x, 28);
+  e('candle', 40, 36, 65, 36, 80, 36);
+  e('cross', 38, 36);
+  e('grave', 44, 36, 74, 36);
   // Shaft back up to the nave.
   fill(85, 26, 87, 27, EMPTY);
   beam(85, 87, 33);
@@ -1676,71 +1167,27 @@ function buildWorld() {
   fill(106, 17, 107, 17); // stone lip outside the door
   fill(108, 0, 109, 12); // outer wall (door at rows 13-16)
   fill(108, 0, 147, 1); // roof
-  fill(110, 2, 147, 16, 1, interior);
+  inside(110, 2, 147, 16);
   fill(110, 9, 141, 9); // floor between levels
   beam(142, 147, 9);
   beam(142, 146, 14);
   beam(142, 146, 11);
   cracked(128, 10, 129, 16);
   e('shrine', 112, 17);
-  e('shade', 121, 17);
-  e('shade', 137, 17);
-  e('veil', 130, 2, { w: 2, h: 7 });
-  e('bat', 138, 5);
-  e('bat', 124, 4);
-  e('candle', 116, 17);
-  e('candle', 126, 9);
-  e('candle', 140, 9);
-  e('window', 118, 11);
-  e('window', 138, 11);
-  e('window', 137, 3);
-  e('rose', 126.5, 2);
-  e('pillar', 113, 2, { h: 14 });
-  e('pillar', 140, 2, { h: 14 });
-  e('candelabra', 132, 9);
-  e('bell', 117, 2);
-
-  // Slide the whole built world right, leaving the forest in front of it.
-  for (let y = 0; y < H; y++) {
-    for (let x = W - 1; x >= OX; x--) {
-      grid[y][x] = grid[y][x - OX];
-      interior[y][x] = interior[y][x - OX];
-    }
-    for (let x = 0; x < OX + 2; x++) {
-      grid[y][x] = EMPTY;
-      interior[y][x] = 0;
-    }
-  }
-  for (const ent of ents) ent.x += OX;
-
-  // World shell
-  fill(0, 0, 1, H - 1);
-  fill(W - 2, 0, W - 1, H - 1);
-  fill(0, H - 2, W - 1, H - 1);
-
-  // Intro forest: the child leaves the house and walks east toward the llanos.
-  const pi = ents.findIndex((o) => o.type === 'player');
-  if (pi >= 0) ents.splice(pi, 1);
-  // A thin crust of earth over blackness: the woods are only trunks and fog.
-  fill(2, 26, OX + 1, H - 1); // floor + buried rock, which the biome draws black
-  e('player', 9, 26);
-  e('house', 6, 26);
-  e('shrine', 12, 26, { lit: true });
-  e('fence', 15, 26);
-  e('fence', 17, 26);
-  for (let i = 0; i < 13; i++) {
-    const x = 21 + i * 6;
-    e('tree', x, 26, { flip: i % 3 === 1, scale: 1.3 + (i % 4) * 0.35 });
-  }
-  for (let x = 24; x <= OX - 2; x += 9) e('scrub', x, 26);
-  for (const x of [19, 30, 42, 54, 66, 78, 90]) e('foresteyes', x, 23 + (x % 4));
+  e('shade', 121, 17, 137, 17);
+  one('veil', 130, 2, 2, 7);
+  e('bat', 138, 5, 124, 4);
+  e('candle', 116, 17, 126, 9, 140, 9);
+  e('window', 117.5, 11, 137.5, 11, 136.5, 3);
+  e('bell', 116.5, 2);
 
   return { grid, interior, ents };
 }
 
 // Digital-glitch camera filter: RGB split, tear bands, datamosh blocks,
 // pixel-sort streaks, scanline corruption and film grain.
-// `intensity` 0..1 drives how broken the picture gets.
+// `amount` 0..1 drives how broken the picture gets.
+// Kept flush left and tight: every byte in here counts against the size limit.
 const FRAG = `
 #ifdef GL_FRAGMENT_PRECISION_HIGH
 precision highp float;
@@ -1748,67 +1195,89 @@ precision highp float;
 precision mediump float;
 #endif
 uniform sampler2D uMainSampler;
-uniform vec2 resolution;
+uniform vec2 res;
 uniform float time;
-uniform float intensity;
+uniform float amount;
 varying vec2 outTexCoord;
-
 float rand(vec2 co) {
-  vec3 p = fract(vec3(co.xyx) * 0.1031);
-  p += dot(p, p.yzx + 33.33);
-  return fract((p.x + p.y) * p.z);
+vec3 p = fract(vec3(co.xyx) * .1031);
+p += dot(p, p.yzx + 33.33);
+return fract((p.x + p.y) * p.z);
 }
-
 float luma(vec3 c) {
-  return dot(c, vec3(0.299, 0.587, 0.114));
+return dot(c, vec3(.299, .587, .114));
 }
-
 void main() {
-  vec2 uv = outTexCoord;
-  float I = intensity;
-  float t = mod(floor(time * 14.0), 251.0);
-
-  float band = floor(uv.y * 28.0);
-  float br = rand(vec2(band, t));
-  float tear = step(1.0 - I * 0.4, br) * (rand(vec2(band + 7.0, t)) - 0.5) * 0.16 * I;
-
-  float line = floor(uv.y * resolution.y);
-  float lj = step(1.0 - I * 0.05, rand(vec2(line * 0.37 + t * 3.1, t + 2.0))) * (rand(vec2(line * 1.7, t)) - 0.5) * 0.06;
-  uv.x += tear + lj;
-
-  vec2 blk = floor(uv * vec2(20.0, 12.0));
-  if (rand(blk + vec2(t * 0.37, t * 0.11)) > 1.0 - I * 0.14) {
-    uv += (vec2(rand(blk + 1.3), rand(blk + 2.1)) - 0.5) * 0.08 * (0.5 + I);
-  }
-
-  float split = 0.0012 + I * 0.014;
-  vec2 dir = vec2(split, split * 0.35 * sin(time * 9.0));
-  vec4 base = texture2D(uMainSampler, uv);
-  float cr = texture2D(uMainSampler, uv + dir).r;
-  float cb = texture2D(uMainSampler, uv - dir).b;
-  vec4 col = vec4(cr, base.g, cb, base.a);
-
-  float colId = floor(uv.x * resolution.x / 2.0);
-  float sortOn = step(1.0 - I * 0.3, rand(vec2(colId * 0.13, band + t)));
-  if (sortOn > 0.5) {
-    vec4 m = col;
-    for (int i = 1; i < 12; i++) {
-      vec4 s = texture2D(uMainSampler, uv + vec2(0.0, float(i) * 3.0 / resolution.y));
-      if (luma(s.rgb) > luma(m.rgb)) { m = s; }
-    }
-    col = mix(col, m, 0.6);
-  }
-
-  col.rgb *= 0.86 + 0.14 * sin(outTexCoord.y * resolution.y * 3.14159);
-
-  float cl = step(1.0 - max(0.0, I - 0.12) * 0.03, rand(vec2(line * 0.37 + t * 13.1, t * 7.3 + 5.0)));
-  col.rgb = mix(col.rgb, vec3(rand(vec2(line, t))), cl * 0.7);
-
-  col.rgb += (rand(outTexCoord * resolution + t * 17.0) - 0.5) * (0.05 + I * 0.1);
-
-  gl_FragColor = col;
+vec2 uv = outTexCoord;
+float I = amount;
+float t = mod(floor(time * 14.), 251.);
+float band = floor(uv.y * 28.);
+float tear = step(1. - I * .4, rand(vec2(band, t))) * (rand(vec2(band + 7., t)) - .5) * .16 * I;
+float line = floor(uv.y * res.y);
+uv.x += tear + step(1. - I * .05, rand(vec2(line * .37 + t * 3.1, t + 2.))) * (rand(vec2(line * 1.7, t)) - .5) * .06;
+vec2 blk = floor(uv * vec2(20., 12.));
+if (rand(blk + vec2(t * .37, t * .11)) > 1. - I * .14) {
+uv += (vec2(rand(blk + 1.3), rand(blk + 2.1)) - .5) * .08 * (.5 + I);
+}
+float split = .0012 + I * .014;
+vec2 dir = vec2(split, split * .35 * sin(time * 9.));
+vec4 col = texture2D(uMainSampler, uv);
+col.r = texture2D(uMainSampler, uv + dir).r;
+col.b = texture2D(uMainSampler, uv - dir).b;
+if (step(1. - I * .3, rand(vec2(floor(uv.x * res.x / 2.) * .13, band + t))) > .5) {
+vec4 m = col;
+for (int i = 1; i < 12; i++) {
+vec4 s = texture2D(uMainSampler, uv + vec2(0., float(i) * 3. / res.y));
+if (luma(s.rgb) > luma(m.rgb)) { m = s; }
+}
+col = mix(col, m, .6);
+}
+col.rgb *= .86 + .14 * sin(outTexCoord.y * res.y * 3.14159);
+float cl = step(1. - max(0., I - .12) * .03, rand(vec2(line * .37 + t * 13.1, t * 7.3 + 5.)));
+col.rgb = mix(col.rgb, vec3(rand(vec2(line, t))), cl * .7);
+col.rgb += (rand(outTexCoord * res + t * 17.) - .5) * (.05 + I * .1);
+gl_FragColor = col;
 }
 `;
+
+// Property and method names are two letters to fit the size limit (the minifier
+// cannot shorten them). What each one means:
+//   aa aimAngle, ab aimBox, ac attackCooldown, ad abyss, af addFlame
+//   ag auraGlow, al addLight, am aiming, an amount, ax aimX
+//   ay aimY, ba bell, bb belfryBell, bc bats, bd buildDarkness
+//   be buildEntities, bf bloodFx, bg bigText, bh bossHearts, bi big
+//   bj base, bl bleed, bm buildTilemaps, bn bones, bo bolt
+//   bp buildPlayer, br burning, bs boss, bt buttress, bx buildFx
+//   bz bellZone, ca ctl, cb crumbling, cc clock, ce collect
+//   cg crackedGroup, ch checkpoint, cl crumble, cm cam, cn coneGlow
+//   co cone, cr cracked, cs chasing, ct cycleTool, cu cut
+//   da downAt, db drawBolt, dc decals, dd dead, df debrisFx
+//   di die, dk dark, dm damage, dp dropRow, dr dir
+//   ds dropBars, dt dropTool, du dropUntil, dv dissolveVeil, dy dying
+//   ef emberFx, eq equipped, ex expires, ey eyes, fa floorAt
+//   fc facing, fg falling, fh flashRect, fl flicker, fn found
+//   fr flashRed, fs focus, gb groundBelow, gd gliding, gf glitchFx
+//   gl glitch, gw glow, ha hideAt, hb hitBoss, hc heartIcons
+//   hd hud, hi hit, hl held, hm home, hn hint
+//   hr hearts, hs hintsShown, ht hurt, ic inCone, iu invulnUntil
+//   iv inventory, jl jolt, jp jumpPressedAt, kl kill, la leaveArena
+//   lg lastGround, lh lights, li lit, ln land, lo lineOfSight
+//   ls lightShrine, lt lastVy, lu lunge, lv level, ly layer
+//   ma msg, mb msgBg, md mode, mg maxGap, mn monsters
+//   mp minGap, ms message, mu modeUntil, na nextAt, op onSpikes
+//   ot onStrike, pa pickableAt, pc pickups, pl player, pn panel
+//   pr prompt, ps pulse, ra respawnAtCheckpoint, rb ruinBell, rc rect
+//   rl reclaim, rt reticle, s0 shineCone, s1 skyFlash, s2 splashFx
+//   s3 smokeFx, sa showBoss, sb silbon, sc schedule, sd shriekAt
+//   se stepTimer, sf spires, sg spikeGroup, sh shades, si slotIcons
+//   sj starting, sk spike, sl slotUnknown, sm spawnMonster, sn strength
+//   sp spawnPickup, sq showMessage, sr strike, ss setRuins, st storm
+//   su stunUntil, sv silbonIntro, sw swingUntil, sx shrines, sy slotGfx
+//   sz startArena, ta tileAt, tb toolLabel, tc tool, th thrown
+//   tk tick, tl tall, tr throwRevolver, ts titleShadow, tt title
+//   ua updateBat, ub updateBoss, ud updateDarkness, ul updateTools, un until
+//   uo umbrellaOpen, up updatePickups, ur updateRainSplashes, us updateShade, ut updatePlayer
+//   vg veilGroup, vl veils, wg wasGrounded, wi win, wn won
 
 // Phaser 3 post-pipeline (registered in the game config) that runs FRAG over a
 // whole camera. Each camera gets its own instance; `ctl` is the Glitch controller feeding it.
@@ -1818,132 +1287,109 @@ class GlitchPipeline extends Phaser.Renderer.WebGL.Pipelines.PostFXPipeline {
   }
 
   onPreRender() {
-    const c = this.ctl;
-    this.set2f('resolution', this.renderer.width, this.renderer.height);
-    this.set1f('time', c ? c.time : 0);
-    this.set1f('intensity', c ? c.intensity : 0);
+    const c = this.ca;
+    this.set2f('res', this.renderer.width, this.renderer.height);
+    this.set1f('time', c ? c.cc : 0);
+    this.set1f('amount', c ? c.an : 0);
   }
 }
 
 class Glitch {
-  constructor(base = 0.04) {
-    this.time = 0;
-    this.base = base;
-    this.intensity = base;
-    this.spike = 0;
+  constructor(base) {
+    this.cc = this.sk = 0;
+    this.bj = this.an = base;
   }
 
   // Momentary burst; decays back to `base`.
-  hit(amount) {
-    this.spike = Math.max(this.spike, amount);
+  hi(amount) {
+    this.sk = max(this.sk, amount);
   }
 
-  tick(dt) {
-    this.time += dt;
-    this.spike *= Math.pow(0.04, dt); // fast exponential decay
-    this.intensity = Math.min(1, this.base + this.spike);
+  tk(dt) {
+    this.cc += dt;
+    this.sk *= 0.04 ** dt; // fast exponential decay
+    this.an = min(1, this.bj + this.sk);
   }
 }
 
 // Adds glitch + vignette to a camera and returns the glitch controller.
-// On the canvas renderer the controller still works, it just draws nothing.
 function addCameraFx(camera, base) {
   const glitch = new Glitch(base);
-  if (camera.scene.game.renderer.type !== Phaser.WEBGL) return glitch;
   camera.setPostPipeline('Glitch');
-  camera.getPostPipeline('Glitch').ctl = glitch;
+  camera.getPostPipeline('Glitch').ca = glitch;
   camera.postFX.addVignette(0.5, 0.5, 0.9, 0.55);
   return glitch;
 }
 
-// `flash` (0..1) is how lit the world is right now — the game uses it to lift the darkness.
+// Small scene helpers.
+const image = (scene, x, y, key, depth, ox = 0.5, oy = ox, frame) => scene.add.image(x, y, key, frame).setOrigin(ox, oy).setDepth(depth);
+const later = (scene, ms, fn) => scene.time.delayedCall(ms, fn);
+const fade = (scene, targets, alpha, duration, delay = 0, onComplete = null) => scene.tweens.add({ targets, alpha, duration, delay, onComplete });
+// Full-screen white sheet, invisible until its alpha is raised.
+const whiteout = (scene, depth) => scene.add.rectangle(0, 0, SCREEN_W, SCREEN_H, 0xffffff).setOrigin(0).setScrollFactor(0).setDepth(depth).setAlpha(0);
+const backdrop = (scene, key, y, depth) => scene.add.tileSprite(0, y, SCREEN_W, SCREEN_H, key).setOrigin(0).setScrollFactor(0).setDepth(depth);
+const range = (min, max) => ({ min, max });
+const ramp = (start, end) => ({ start, end });
+
+// `level` (0..1) is how lit the world is right now — the game uses it to lift the darkness.
 class Storm {
-  constructor(scene, { rainBackDepth = 40, rainFrontDepth = 62, flashDepth = 55, minGap = 4000, maxGap = 10000 } = {}) {
+  constructor(scene, minGap = 4000, maxGap = 10000) {
     this.scene = scene;
-    this.flash = 0;
-    this.minGap = minGap;
-    this.maxGap = maxGap;
-    this.onStrike = null;
-    const { width, height } = scene.scale;
+    this.lv = 0;
+    this.mp = minGap;
+    this.mg = maxGap;
+    this.ot = null;
 
-    this.sky = scene.add.image(0, 0, 'sky').setOrigin(0).setScrollFactor(0).setDepth(-30);
-    this.skyFlash = scene.add.rectangle(0, 0, width, height, 0xffffff).setOrigin(0).setScrollFactor(0).setDepth(-29).setAlpha(0);
-    this.bolt = scene.add.graphics().setScrollFactor(0).setDepth(-28);
+    image(scene, 0, 0, 'sky', -30, 0).setScrollFactor(0);
+    this.s1 = whiteout(scene, -29);
+    this.bo = scene.add.graphics().setScrollFactor(0).setDepth(-28);
 
-    this.rain = scene.add
-      .particles(0, 0, 'drop', {
-        x: { min: -60, max: width + 120 },
-        y: -20,
-        lifespan: 1000,
-        speedY: { min: 520, max: 640 },
-        speedX: { min: -135, max: -115 },
-        alpha: { min: 0.25, max: 0.55 },
-        scaleY: { min: 0.7, max: 1.3 },
-        quantity: 5,
-        frequency: 16,
-      })
-      .setScrollFactor(0)
-      .setDepth(rainBackDepth);
+    const rain = (depth, lifespan, speedY, speedX, alpha, quantity, frequency, extra) =>
+      scene.add
+        .particles(0, 0, 'drop', { x: range(-60, SCREEN_W + 120), y: -20, lifespan, speedY, speedX, alpha, quantity, frequency, ...extra })
+        .setScrollFactor(0)
+        .setDepth(depth);
+    rain(40, 1000, range(520, 640), range(-135, -115), range(0.25, 0.55), 5, 16, { scaleY: range(0.7, 1.3) });
+    rain(62, 750, range(700, 800), range(-170, -150), range(0.1, 0.22), 2, 20, { scale: range(1.2, 1.6) });
 
-    this.rainFront = scene.add
-      .particles(0, 0, 'drop', {
-        x: { min: -60, max: width + 120 },
-        y: -20,
-        lifespan: 750,
-        speedY: { min: 700, max: 800 },
-        speedX: { min: -170, max: -150 },
-        alpha: { min: 0.1, max: 0.22 },
-        scale: { min: 1.2, max: 1.6 },
-        quantity: 2,
-        frequency: 20,
-      })
-      .setScrollFactor(0)
-      .setDepth(rainFrontDepth);
-
-    this.flashRect = scene.add.rectangle(0, 0, width, height, 0xffffff).setOrigin(0).setScrollFactor(0).setDepth(flashDepth).setAlpha(0);
-
-    this.schedule();
+    this.fh = whiteout(scene, 55);
+    this.sc();
   }
 
-  schedule() {
-    this.scene.time.delayedCall(Phaser.Math.Between(this.minGap, this.maxGap), () => {
-      this.strike();
-      this.schedule();
+  sc() {
+    later(this.scene, between(this.mp, this.mg), () => {
+      this.sr();
+      this.sc();
     });
   }
 
-  strike(power = Phaser.Math.FloatBetween(0.6, 1)) {
-    const { width } = this.scene.scale;
-    this.drawBolt(Phaser.Math.Between(40, width - 40));
-    this.flash = power;
-    this.scene.time.delayedCall(80, () => (this.flash = 0.15));
-    this.scene.time.delayedCall(150, () => {
-      this.flash = power;
-      this.drawBolt(Phaser.Math.Between(40, width - 40));
+  sr(power = Phaser.Math.FloatBetween(0.6, 1)) {
+    const bolt = () => this.db(between(40, SCREEN_W - 40));
+    bolt();
+    this.lv = power;
+    later(this.scene, 80, () => (this.lv = 0.15));
+    later(this.scene, 150, () => {
+      this.lv = power;
+      bolt();
     });
-    audio.thunder(Phaser.Math.FloatBetween(0.15, 1.4), power);
-    if (this.onStrike) this.onStrike(power);
+    thunder(Phaser.Math.FloatBetween(0.15, 1.4), power);
+    if (this.ot) this.ot(power);
   }
 
-  drawBolt(x) {
-    const g = this.bolt;
+  db(x) {
+    const g = this.bo;
     g.clear();
-    const seg = (x0, y0, len, width, depth) => {
-      let x1 = x0;
-      let y1 = y0;
-      g.lineStyle(width, 0xffffff, 1);
-      g.beginPath();
-      g.moveTo(x1, y1);
+    const seg = (x1, y1, len, width, depth) => {
+      const begin = () => g.lineStyle(width, 0xffffff, 1).beginPath().moveTo(x1, y1);
+      begin();
       for (let i = 0; i < len; i++) {
-        x1 += Phaser.Math.Between(-14, 14);
-        y1 += Phaser.Math.Between(8, 18);
+        x1 += between(-14, 14);
+        y1 += between(8, 18);
         g.lineTo(x1, y1);
-        if (depth < 2 && Math.random() < 0.15) {
+        if (depth < 2 && random() < 0.15) {
           g.strokePath();
-          seg(x1, y1, Math.floor(len / 3), Math.max(1, width - 1), depth + 1);
-          g.lineStyle(width, 0xffffff, 1);
-          g.beginPath();
-          g.moveTo(x1, y1);
+          seg(x1, y1, floor(len / 3), max(1, width - 1), depth + 1);
+          begin();
         }
       }
       g.strokePath();
@@ -1952,10 +1398,10 @@ class Storm {
   }
 
   update(dt) {
-    this.flash = Math.max(0, this.flash - dt * 1.6);
-    this.bolt.setAlpha(this.flash > 0.3 ? 1 : this.flash * 3);
-    this.skyFlash.setAlpha(this.flash * 0.45);
-    this.flashRect.setAlpha(this.flash * 0.12);
+    const l = (this.lv = max(0, this.lv - dt * 1.6));
+    this.bo.setAlpha(l > 0.3 ? 1 : l * 3);
+    this.s1.setAlpha(l * 0.45);
+    this.fh.setAlpha(l * 0.12);
   }
 }
 
@@ -1967,18 +1413,22 @@ class BootScene extends Phaser.Scene {
   create() {
     makeArt(this);
 
-    const frames = (key, list) => list.map((frame) => ({ key, frame }));
-    this.anims.create({ key: 'child-idle', frames: frames('child', [0]), frameRate: 1 });
-    this.anims.create({ key: 'child-run', frames: frames('child', [1, 2, 3, 2]), frameRate: 10, repeat: -1 });
-    this.anims.create({ key: 'child-jump', frames: frames('child', [4]), frameRate: 1 });
-    this.anims.create({ key: 'shade-walk', frames: frames('shade', [0, 1]), frameRate: 3, repeat: -1 });
-    this.anims.create({ key: 'silbon-walk', frames: frames('silbon', [0, 1]), frameRate: 4, repeat: -1 });
-    this.anims.create({ key: 'bat-fly', frames: frames('bat', [0, 1]), frameRate: 10, repeat: -1 });
-    this.anims.create({ key: 'flame', frames: frames('flame', [0, 1]), frameRate: 7, repeat: -1 });
+    const anim = (key, texture, list, frameRate, repeat = -1) =>
+      this.anims.create({ key, frames: list.map((frame) => ({ key: texture, frame })), frameRate, repeat });
+    anim('child-idle', 'child', [0], 1, 0);
+    anim('child-run', 'child', [1, 2, 3, 2], 10);
+    anim('child-jump', 'child', [4], 1, 0);
+    anim('shade-walk', 'shade', [0, 1], 3);
+    anim('silbon-walk', 'silbon', [0, 1], 4);
+    anim('bat-fly', 'bat', [0, 1], 10);
+    anim('flame', 'flame', [0, 1], 7);
 
     this.scene.start('Title');
   }
 }
+
+const TOOLS = ['flashlight', 'crowbar', 'umbrella', 'revolver'];
+const TOOL_NAMES = { flashlight: 'LINTERNA', crowbar: 'PATA DE CABRA', umbrella: 'PARAGUAS', revolver: 'REVOLVER' };
 
 class TitleScene extends Phaser.Scene {
   constructor() {
@@ -1986,29 +1436,27 @@ class TitleScene extends Phaser.Scene {
   }
 
   create() {
-    const { width, height } = this.scale;
-    this.starting = false;
-    this.glitch = addCameraFx(this.cameras.main, 0.08);
-    this.storm = new Storm(this, { minGap: 2500, maxGap: 6000 });
-    this.storm.onStrike = (p) => this.glitch.hit(0.5 * p);
+    const cam = this.cameras.main;
+    const mid = SCREEN_W / 2;
+    const ground = SCREEN_H - 36;
+    this.sj = false;
+    this.gl = addCameraFx(cam, 0.08);
+    this.st = new Storm(this, 2500, 6000);
+    this.st.ot = (p) => this.gl.hi(0.5 * p);
 
-    this.add.tileSprite(0, 84, width, height, 'hills').setOrigin(0).setScrollFactor(0).setDepth(-22);
-    this.add.tileSprite(0, 70, width, height, 'grove').setOrigin(0).setScrollFactor(0).setDepth(-21);
+    backdrop(this, 'spires', 84, -22);
+    backdrop(this, 'buttress', 70, -21);
 
-    this.add.image(width / 2, height - 36, 'child', 0).setOrigin(0.5, 1).setScale(2).setDepth(10);
-    this.add.rectangle(0, height - 36, width, 36, 0x050505).setOrigin(0).setDepth(9);
-    this.add.image(width / 2 - 120, height - 36, 'shade', 0).setOrigin(0.5, 1).setScale(2).setDepth(8).setAlpha(0.8);
-    this.add.image(width / 2 + 150, height - 36, 'shade', 1).setOrigin(0.5, 1).setScale(2).setDepth(8).setAlpha(0.8).setFlipX(true);
-    this.eyes = [
-      this.add.image(width / 2 - 118, height - 36 - 55, 'eyes').setScale(2).setDepth(12),
-      this.add.image(width / 2 + 148, height - 36 - 55, 'eyes').setScale(2).setDepth(12),
-    ];
+    image(this, mid, ground, 'child', 10, 0.5, 1, 0).setScale(2);
+    this.add.rectangle(0, ground, SCREEN_W, 36, 0x050505).setOrigin(0).setDepth(9);
+    image(this, mid - 120, ground, 'shade', 8, 0.5, 1, 0).setScale(2).setAlpha(0.8);
+    image(this, mid + 150, ground, 'shade', 8, 0.5, 1, 1).setScale(2).setAlpha(0.8).setFlipX(true);
+    this.ey = [mid - 118, mid + 148].map((x) => image(this, x, ground - 55, 'eyes', 12).setScale(2));
 
-    this.titleShadow = this.add.image(width / 2 + 3, 98, 'logo').setTintFill(0xb00010).setDepth(20);
-    this.title = this.add.image(width / 2, 96, 'logo').setDepth(21);
-    label(this, width / 2, 150, 'UNA TORMENTA SOBRE LOS LLANOS', 0x8c8c8c).setDepth(21);
+    this.ts = image(this, mid + 3, 98, 'logo', 20).setTintFill(0xb00010);
+    this.tt = image(this, mid, 96, 'logo', 21);
     // Controls, shown rather than told: what the child does, then the button that does it.
-    const img = (x, y, key, frame) => this.add.image(x, y, key, frame).setScale(2).setDepth(21);
+    const img = (x, y, key, frame) => image(this, x, y, key, 21, 0.5, 0.5, frame).setScale(2);
     const gfx = this.add.graphics().setDepth(21);
     [
       ['MOVER', 'JOYSTICK', (x, y) => this.add.sprite(x, y, 'child').setScale(2).setDepth(21).play('child-run')],
@@ -2016,7 +1464,7 @@ class TitleScene extends Phaser.Scene {
         'USAR',
         'BTN 2',
         (x, y) => {
-          this.add.image(x + 10, y, 'cone').setOrigin(0, 0.5).setScale(0.2).setAlpha(0.5).setDepth(20);
+          image(this, x + 10, y, 'cone', 20, 0, 0.5).setScale(0.2).setAlpha(0.5);
           img(x - 12, y, 'child', 0);
           img(x + 4, y + 4, 'tool_flashlight');
         },
@@ -2029,17 +1477,17 @@ class TitleScene extends Phaser.Scene {
           img(x, y - 30, 'umbrella_open');
         },
       ],
-      ['CAMBIAR', 'BTN 4 / 5', (x, y) => TOOLS.slice(0, 3).forEach((t, i) => img(x + (i - 1) * 30, y + 6, `tool_${t}`))],
+      ['CAMBIAR', 'BTN 5 / 6', (x, y) => TOOLS.slice(0, 3).forEach((t, i) => img(x + (i - 1) * 30, y + 6, 'tool_' + t))],
       [
         'APUNTAR',
-        'BTN 3 Y JOYSTICK',
+        'BTN 2 Y JOYSTICK',
         (x, y) => {
           img(x - 12, y, 'child', 0);
-          img(x + 14, y - 22, 'reticle').setRotation(-Math.PI / 4);
+          img(x + 14, y - 22, 'reticle').setRotation(-PI / 4);
         },
       ],
     ].forEach(([act, btn, icon], i) => {
-      const x = width / 2 + (i - 2) * 124;
+      const x = mid + (i - 2) * 124;
       icon(x, 214);
       label(this, x, 250, act).setDepth(21);
       gfx.fillStyle(0x4a4a4a).fillRect(x - 13, 276, 26, 6);
@@ -2047,19 +1495,19 @@ class TitleScene extends Phaser.Scene {
       else gfx.fillStyle(0x9a9a9a).fillRect(x, 264, 3, 12).fillStyle(0xff1a1a).fillRect(x - 3, 259, 9, 8);
       label(this, x, 292, btn, 0x8c8c8c).setDepth(21);
     });
-    label(this, width / 2, 314, 'ABAJO X2: BAJAR POR LAS VIGAS   PINTURA AMARILLA: SE ROMPE   BTN 6: SILENCIAR', 0x6a6a6a).setDepth(21);
-    this.prompt = label(this, width / 2, 344, 'PULSA START', 0xffffff, 2).setDepth(21);
+    label(this, mid, 314, 'ABAJOX2: BAJAR VIGAS   PINTURA AMARILLA: SE ROMPE   BTN 4: SILENCIAR', 0x6a6a6a).setDepth(21);
+    this.pr = label(this, mid, 344, 'PULSA START', 0xffffff, 2).setDepth(21);
 
     const start = () => {
-      if (this.starting) return;
-      this.starting = true;
-      audio.init();
-      audio.startMusic();
-      audio.play('glitch');
-      this.glitch.hit(1);
-      this.storm.strike(1);
-      this.cameras.main.fadeOut(700, 0, 0, 0);
-      this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('Game'));
+      if (this.sj) return;
+      this.sj = true;
+      initAudio();
+      startMusic();
+      sound('glitch');
+      this.gl.hi(1);
+      this.st.sr(1);
+      cam.fadeOut(700, 0, 0, 0);
+      cam.once('camerafadeoutcomplete', () => this.scene.start('Game'));
     };
     anyPress = start;
     this.events.once('shutdown', () => (anyPress = null));
@@ -2068,15 +1516,15 @@ class TitleScene extends Phaser.Scene {
 
   update(time, delta) {
     const dt = delta / 1000;
-    this.storm.update(dt);
-    this.glitch.tick(dt);
-    this.prompt.setAlpha(Math.floor(time / 500) % 2 ? 0.35 : 1);
+    const mid = SCREEN_W / 2;
+    this.st.update(dt);
+    this.gl.tk(dt);
+    this.pr.setAlpha(floor(time / 500) % 2 ? 0.35 : 1);
 
-    const g = this.glitch.intensity;
-    const jitter = Math.random() < 0.06 + g * 0.3 ? Phaser.Math.Between(-6, 6) : 0;
-    this.title.x = this.scale.width / 2 + jitter;
-    this.titleShadow.x = this.scale.width / 2 + 3 - jitter * 1.5 + (Math.random() < 0.05 ? 8 : 0);
-    for (const e of this.eyes) e.setAlpha(0.6 + Math.random() * 0.4 + this.storm.flash);
+    const jitter = random() < 0.06 + this.gl.an * 0.3 ? between(-6, 6) : 0;
+    this.tt.x = mid + jitter;
+    this.ts.x = mid + 3 - jitter * 1.5 + (random() < 0.05 ? 8 : 0);
+    for (const e of this.ey) e.setAlpha(0.6 + random() * 0.4 + this.st.lv);
   }
 }
 
@@ -2087,9 +1535,22 @@ const MAX_HEARTS = 3;
 const DROP_TIME = 5000; // how long a dropped tool waits on the ground
 const BASE_DARK = 0.8;
 const HUD_LINGER = 4000; // ms the HUD stays up after a tool change or a hit
-const TOOLS = ['flashlight', 'crowbar', 'umbrella', 'revolver'];
 const BOSS_HP = 8;
-const TOOL_NAMES = { flashlight: 'LINTERNA', crowbar: 'PATA DE CABRA', umbrella: 'PARAGUAS', revolver: 'REVOLVER' };
+const NEVER = -1e9;
+// How each tool is held: [distance from the child along the aim, height, scale].
+const TOOL_HOLD = { flashlight: [8, 11, 0.6], crowbar: [7, 10, 0.8], umbrella: [6, 10, 0.7], revolver: [9, 11, 0.8] };
+// Scenery that is just an image standing on its tile: [origin y, depth, y offset].
+const PROPS = {
+  tree: [1, -3, 2],
+  grave: [1, -2, 1],
+  cross: [1, -2, 1],
+  candle: [1, -1, 0],
+  candelabra: [1, -1, 0],
+  window: [0, -7, 0],
+  rose: [0, -7, 0],
+  bell: [0, -1, 0],
+  vault: [0, -7, 0],
+};
 
 class GameScene extends Phaser.Scene {
   constructor() {
@@ -2097,1486 +1558,1153 @@ class GameScene extends Phaser.Scene {
   }
 
   create() {
-    this.world = buildWorld();
-    this.cracked = new Map(); // "x,y" -> sprite
-    this.lights = []; // static light sources {x, y, r, flicker}
-    this.decals = [];
-    this.hintsShown = new Set();
-    this.dead = false;
-    this.won = false;
-    this.hearts = MAX_HEARTS;
-    this.inventory = new Set(['flashlight']);
-    this.found = new Set(['flashlight']);
-    this.equipped = 'flashlight';
-    this.facing = 1;
-    this.invulnUntil = 0;
-    this.stunUntil = 0;
-    this.lastGround = 0;
-    this.jumpPressedAt = -1e9;
-    this.downAt = -1e9;
-    this.dropRow = -1; // beam row being dropped through
-    this.dropUntil = 0;
-    this.attackCooldown = 0;
-    this.swingUntil = 0;
-    this.gliding = false;
-    this.stepTimer = 0;
-    this.flicker = 1;
-    this.aiming = false;
-    this.aimAngle = 0;
-    this.aim = { x: 1, y: 0 };
+    this.ln = buildWorld();
+    this.cr = new Map(); // "x,y" -> sprite
+    this.lh = []; // static light sources {x, y, r, flicker, glow}
+    this.dc = [];
+    this.hs = new Set();
+    this.dd = this.wn = this.gd = this.am = this.th = false;
+    this.cu = false; // cutscene: the child stands frozen
+    this.hr = MAX_HEARTS;
+    this.iv = new Set(['flashlight']);
+    this.fn = new Set(['flashlight']);
+    this.eq = 'flashlight';
+    this.fc = this.fl = this.ax = 1;
+    this.iu = this.su = this.lg = this.du = this.ac = this.sw = this.se = this.aa = this.ay = 0;
+    this.jp = this.da = NEVER;
+    this.dp = -1; // beam row being dropped through
+    this.bs = this.sb = this.rb = null;
 
-    const cam = this.cameras.main;
-    this.glitch = addCameraFx(cam, 0.04);
-    this.storm = new Storm(this);
-    this.storm.onStrike = (p) => this.glitch.hit(0.35 * p);
+    const cam = (this.cm = this.cameras.main);
+    this.gl = addCameraFx(cam, 0.04);
+    this.st = new Storm(this);
+    this.st.ot = (p) => this.gl.hi(0.35 * p);
     cam.fadeIn(900, 0, 0, 0);
 
-    this.buildBackdrop();
-    this.buildTilemaps();
-    this.buildFx();
-    this.buildEntities();
-    this.buildPlayer();
-    this.buildDarkness();
-    this.buildHud();
-    this.buildInput();
+    this.sf = backdrop(this, 'spires', 0, -22);
+    this.bt = backdrop(this, 'buttress', 0, -21);
+    this.bm();
+    this.bx();
+    this.be();
+    this.bp();
+    this.bd();
+
+    // The HUD lives in its own scene so the darkness, vignette and glitch
+    // filters never dim it. It fades out on its own when nothing changes.
+    this.hd = this.scene.get('Hud');
+    this.scene.launch('Hud');
+    this.events.once('shutdown', () => this.scene.stop('Hud'));
+
+    // Ignore whatever was pressed on the title screen.
+    clearTaps();
 
     this.physics.world.setBounds(0, 0, W * T, H * T);
     cam.setBounds(0, 0, W * T, H * T);
-    cam.startFollow(this.player, true, 0.12, 0.12, 0, 30);
+    cam.startFollow(this.pl, true, 0.12, 0.12, 0, 30);
 
-    this.cut = false; // cutscene: the child stands frozen
-    this.boss = null;
-    this.silbon = null;
-    this.ruinBell = null;
-    this.thrown = false; // the revolver has been thrown in
     // The legend: when the whistle sounds close, El Silbon is far away.
-    this.time.delayedCall(5200, () => {
-      audio.whistle(0.14, 76);
-      this.hint('whistle', 'Un silbido... dicen que si suena cerca, el esta lejos.', 4500);
+    later(this, 5200, () => {
+      whistle(0.14, 76);
+      this.hn('whistle', 'Un silbido... dicen que si suena cerca, el esta lejos.', 4500);
     });
-    this.time.delayedCall(900, () => this.hint('start', 'Sales de tu casa. Camina al este por el bosque; los llanos quedan mas alla.'));
+    later(this, 900, () => this.hn('start', 'JOYSTICK mover - BOTON 1 saltar - tu LINTERNA quema lo que acecha'));
   }
 
-  buildBackdrop() {
-    const { width, height } = this.scale;
-    this.hills = this.add.tileSprite(0, 0, width, height, 'hills').setOrigin(0).setScrollFactor(0).setDepth(-22);
-    this.grove = this.add.tileSprite(0, 0, width, height, 'grove').setOrigin(0).setScrollFactor(0).setDepth(-21);
-    this.forestFar = this.add.tileSprite(0, 0, width, height, 'forestfar').setOrigin(0).setScrollFactor(0).setDepth(-25);
-    this.forestMid = this.add.tileSprite(0, 0, width, height, 'forestmid').setOrigin(0).setScrollFactor(0).setDepth(-24);
-    this.foreTrees = this.add.tileSprite(0, 0, width, height, 'foretrees').setOrigin(0).setScrollFactor(0).setDepth(60);
-  }
-
-  buildTilemaps() {
-    const { grid, interior } = this.world;
-    // A thin crust of textured rock over pure black. Only the exposed faces
-    // and the cave are drawn; everything buried is opaque darkness, so the
-    // world never shows through to the other side.
-    const CAVE_L = 34 + OX;
-    const CAVE_R = 89 + OX;
-    const inCave = (x, y) => x >= CAVE_L && x <= CAVE_R && y >= CAVE_Y - 1;
-    const exposed = (x, y, top) =>
-      top ||
-      (y > 1 && grid[y - 1][x] === SOLID && grid[y - 2][x] !== SOLID) ||
-      (x > 0 && grid[y][x - 1] === EMPTY) ||
-      (x < W - 1 && grid[y][x + 1] === EMPTY) ||
-      (y < H - 1 && grid[y + 1][x] === EMPTY);
-    const solidTile = (x, y, top) => {
-      if (inCave(x, y)) return top ? TILE.ROCK_TOP : TILE.ROCK;
-      if (!exposed(x, y, top)) return TILE.BLACK;
-      if (x >= 106 + OX && y < CAVE_Y) return top ? TILE.STONE_TOP : TILE.STONE;
-      if (y >= CAVE_Y) return top ? TILE.ROCK_TOP : TILE.ROCK;
-      return top ? TILE.DIRT_TOP : TILE.DIRT;
+  bm() {
+    const { grid, interior } = this.ln;
+    const rand = new Phaser.Math.RandomDataGenerator(['bg']);
+    const layer = (data, depth) => {
+      const map = this.make.tilemap({ data, tileWidth: T, tileHeight: T });
+      return map.createLayer(0, map.addTilesetImage('tiles', 'tiles', T, T, 0, 0), 0, 0).setDepth(depth);
     };
-    const bgTile = (x, y) => (y >= CAVE_Y ? TILE.CAVE : x >= 106 + OX ? TILE.STONE : TILE.BG);
 
-    const data = grid.map((row, y) =>
-      row.map((v, x) => {
-        if (v === SOLID) return solidTile(x, y, y > 0 && grid[y - 1][x] !== SOLID);
-        if (v === BEAM) return TILE.BEAM;
-        return -1;
-      }),
+    layer(
+      interior.map((row) => row.map((v) => (v ? (rand.frac() < 0.3 ? TILE_BG_ALT : TILE_BG) : -1))),
+      -10,
     );
-    const bgData = interior.map((row, y) => row.map((v, x) => (v ? bgTile(x, y) : -1)));
-
-    const bgMap = this.make.tilemap({ data: bgData, tileWidth: T, tileHeight: T });
-    bgMap.createLayer(0, bgMap.addTilesetImage('tiles', 'tiles', T, T, 0, 0), 0, 0).setDepth(-10);
-
-    const map = this.make.tilemap({ data, tileWidth: T, tileHeight: T });
-    this.layer = map.createLayer(0, map.addTilesetImage('tiles', 'tiles', T, T, 0, 0), 0, 0).setDepth(0);
-    this.layer.setCollision([TILE.DIRT, TILE.DIRT_TOP, TILE.ROCK, TILE.ROCK_TOP, TILE.STONE, TILE.STONE_TOP, TILE.BLACK]);
-    this.layer.forEachTile((t) => {
-      if (t.index === TILE.BEAM) t.setCollision(false, false, true, false);
+    this.ly = layer(
+      grid.map((row, y) =>
+        row.map((v, x) => (v === SOLID ? (y > 0 && grid[y - 1][x] !== SOLID ? TILE_BRICK_TOP : TILE_BRICK) : v === BEAM ? TILE_BEAM : -1)),
+      ),
+      0,
+    );
+    this.ly.setCollision([TILE_BRICK, TILE_BRICK_TOP]);
+    this.ly.forEachTile((t) => {
+      if (t.index === TILE_BEAM) t.setCollision(false, false, true, false);
     });
   }
 
-  buildFx() {
-    this.bloodFx = this.add
-      .particles(0, 0, 'blood', {
-        emitting: false,
-        lifespan: { min: 500, max: 1100 },
-        speed: { min: 60, max: 240 },
-        angle: { min: 200, max: 340 },
-        gravityY: 700,
-        scale: { start: 1, end: 0.4 },
-      })
-      .setDepth(20);
-    this.smokeFx = this.add
-      .particles(0, 0, 'smoke', {
-        emitting: false,
-        lifespan: 600,
-        speedY: { min: -60, max: -20 },
-        speedX: { min: -20, max: 20 },
-        alpha: { start: 0.6, end: 0 },
-        scale: { start: 0.6, end: 1.6 },
-      })
-      .setDepth(21);
-    this.emberFx = this.add
-      .particles(0, 0, 'px', {
-        emitting: false,
-        lifespan: 500,
-        speed: { min: 20, max: 80 },
-        angle: { min: 220, max: 320 },
-        tint: [0xff1a1a, 0xffffff],
-        scale: { start: 1, end: 0 },
-      })
-      .setDepth(61);
-    this.debrisFx = this.add
-      .particles(0, 0, 'chunk', {
-        emitting: false,
-        lifespan: 900,
-        speed: { min: 40, max: 200 },
-        angle: { min: 200, max: 340 },
-        gravityY: 800,
-        rotate: { min: 0, max: 360 },
-      })
-      .setDepth(20);
-    this.splashFx = this.add
-      .particles(0, 0, 'px', {
-        emitting: false,
-        lifespan: 220,
-        speedY: { min: -70, max: -30 },
-        speedX: { min: -40, max: 40 },
-        gravityY: 400,
-        scale: { start: 0.6, end: 0.2 },
-        alpha: { start: 0.6, end: 0 },
-        tint: 0xbbbbbb,
-      })
-      .setDepth(15);
-    this.glitchFx = this.add
-      .particles(0, 0, 'px', {
-        emitting: false,
-        lifespan: 500,
-        speed: { min: 20, max: 120 },
-        tint: [0xff1a1a, 0xffffff, 0x000000],
-        scaleX: { min: 1, max: 5 },
-        scaleY: 0.5,
-      })
-      .setDepth(61);
+  bx() {
+    const fx = (key, depth, config) => this.add.particles(0, 0, key, { emitting: false, ...config }).setDepth(depth);
+    this.bf = fx('blood', 20, { lifespan: range(500, 1100), speed: range(60, 240), angle: range(200, 340), gravityY: 700, scale: ramp(1, 0.4) });
+    this.s3 = fx('smoke', 21, { lifespan: 600, speedY: range(-60, -20), speedX: range(-20, 20), alpha: ramp(0.6, 0), scale: ramp(0.6, 1.6) });
+    this.ef = fx('px', 61, { lifespan: 500, speed: range(20, 80), angle: range(220, 320), tint: [0xff1a1a, 0xffffff], scale: ramp(1, 0) });
+    this.df = fx('chunk', 20, { lifespan: 900, speed: range(40, 200), angle: range(200, 340), gravityY: 800, rotate: range(0, 360) });
+    this.s2 = fx('px', 15, {
+      lifespan: 220,
+      speedY: range(-70, -30),
+      speedX: range(-40, 40),
+      gravityY: 400,
+      scale: ramp(0.6, 0.2),
+      alpha: ramp(0.6, 0),
+      tint: 0xbbbbbb,
+    });
+    this.gf = fx('px', 61, { lifespan: 500, speed: range(20, 120), tint: [0xff1a1a, 0xffffff, 0], scaleX: range(1, 5), scaleY: 0.5 });
   }
 
-  buildEntities() {
-    this.shades = this.physics.add.group();
-    this.bats = this.physics.add.group({ allowGravity: false });
-    this.pickups = this.physics.add.group();
-    this.crackedGroup = this.physics.add.staticGroup();
-    this.spikeGroup = this.physics.add.staticGroup();
-    this.veilGroup = this.physics.add.staticGroup();
-    this.veils = [];
-    this.shrines = [];
+  be() {
+    const physics = this.physics.add;
+    this.sh = physics.group();
+    this.bc = physics.group({ allowGravity: false });
+    this.pc = physics.group();
+    this.cg = physics.staticGroup();
+    this.sg = physics.staticGroup();
+    this.vg = physics.staticGroup();
+    this.vl = [];
+    this.sx = [];
 
-    for (const ent of this.world.ents) {
-      const px = ent.x * T + T / 2;
-      const py = ent.y * T;
-      switch (ent.type) {
-        case 'player':
-          this.spawn = { x: px, y: py };
+    for (const { type, x, y, a, b } of this.ln.ents) {
+      const px = x * T + 8;
+      const py = y * T;
+      const prop = PROPS[type];
+      let s = prop && image(this, px, py + prop[2], type, prop[1], type === 'vault' ? 0 : 0.5, prop[0]);
+      switch (type) {
+        case 'shrine':
+          this.sx.push((s = image(this, px, py, 'shrine', 2, 0.5, 1)));
+          if (a) this.ls((this.ch = s), true);
           break;
-        case 'shrine': {
-          const s = this.add.image(px, py, ent.lit ? 'shrine_lit' : 'shrine').setOrigin(0.5, 1).setDepth(2);
-          const shrine = { sprite: s, x: px, y: py, lit: !!ent.lit, flames: [] };
-          if (ent.lit) this.lightShrine(shrine, true);
-          this.shrines.push(shrine);
-          if (ent.lit) this.checkpoint = shrine;
-          break;
-        }
         case 'tree':
-          this.add.image(px, py + 2, 'tree').setOrigin(0.5, 1).setDepth(-3).setFlipX(!!ent.flip).setScale(ent.scale || 1);
-          break;
-        case 'house':
-          this.add.image(px, py + 2, 'house').setOrigin(0.5, 1).setDepth(-1);
-          this.lights.push({ x: px + 16, y: py - 19, r: 64, flicker: true });
-          break;
-        case 'fence':
-          this.add.image(px, py + 1, 'fence').setOrigin(0.5, 1).setDepth(-2);
-          break;
-        case 'foresteyes': {
-          const ey = this.add.image(px, py, 'eyes').setDepth(-5).setScale(1.4).setAlpha(0.5);
-          this.tweens.add({
-            targets: ey,
-            alpha: { from: 0.12, to: 0.85 },
-            duration: 1600 + Math.random() * 1400,
-            yoyo: true,
-            repeat: -1,
-            delay: Math.random() * 2000,
-          });
-          break;
-        }
-        case 'grave':
-        case 'cross':
-          this.add.image(px, py + 1, ent.type).setOrigin(0.5, 1).setDepth(-2);
-          break;
-        case 'scrub':
-          this.add.image(px, py + 1, 'scrub').setOrigin(0.5, 1).setDepth(-2);
-          break;
-        case 'stalagmite':
-          this.add.image(px, py + 1, 'stalagmite').setOrigin(0.5, 1).setDepth(-1);
-          break;
-        case 'stalactite':
-          this.add.image(px, py, 'stalagmite').setOrigin(0.5, 0).setFlipY(true).setDepth(-1);
+          s.setFlipX(!!a);
           break;
         case 'candle':
-          this.add.image(px, py, 'candle').setOrigin(0.5, 1).setDepth(-1);
-          this.addFlame(px, py - 10, 34);
+          this.af(px, py - 10, 34);
           break;
         case 'candelabra':
-          this.add.image(px, py, 'candelabra').setOrigin(0.5, 1).setDepth(-1);
-          this.addFlame(px - 8, py - 30, 0);
-          this.addFlame(px, py - 29, 0);
-          this.addFlame(px + 8, py - 30, 0);
-          this.lights.push({ x: px, y: py - 28, r: 70, flicker: true });
+          this.af(px - 8, py - 30);
+          this.af(px, py - 29);
+          this.af(px + 8, py - 30);
+          this.al(px, py - 28, 70);
           break;
         case 'pillar':
-          this.add.tileSprite(px, ent.y * T, 20, ent.h * T, 'pillar').setOrigin(0.5, 0).setDepth(-8);
+          this.add.tileSprite(px, py, 20, 22 * T, 'pillar').setOrigin(0.5, 0).setDepth(-8);
           break;
         case 'vault':
-          this.add.image(px, ent.y * T, 'vault').setOrigin(0, 0).setDisplaySize(9 * T, 48).setDepth(-7);
-          break;
-        case 'window':
-          this.add.image(ent.x * T, ent.y * T, 'window').setOrigin(0.5, 0).setDepth(-7);
-          break;
-        case 'rose':
-          this.add.image(ent.x * T, ent.y * T, 'rose').setOrigin(0.5, 0).setDepth(-7);
+          s.setDisplaySize(9 * T, 48);
           break;
         case 'bell':
-          this.bell = this.add.image(ent.x * T, ent.y * T, 'bell').setOrigin(0.5, 0).setDepth(-1);
-          this.add.rectangle(ent.x * T, ent.y * T - 4, 60, 6, 0x1a1a1a).setDepth(-2);
-          this.bellZone = new Phaser.Geom.Rectangle(ent.x * T - 56, ent.y * T, 112, 7 * T);
-          this.lights.push({ x: ent.x * T, y: ent.y * T + 30, r: 50, flicker: false });
+          this.ba = s;
+          this.add.rectangle(px, py - 4, 60, 6, 0x1a1a1a).setDepth(-2);
+          this.bz = new Phaser.Geom.Rectangle(px - 56, py, 112, 7 * T);
+          this.al(px, py + 30, 50, false);
           break;
         case 'cracked': {
-          const c = this.crackedGroup.create(ent.x * T + 8, ent.y * T + 8, 'cracked');
-          c.tx = ent.x;
-          c.ty = ent.y;
-          this.cracked.set(`${ent.x},${ent.y}`, c);
+          const c = this.cg.create(px, py + 8, 'cracked');
+          c.tx = x;
+          c.ty = y;
+          this.cr.set(x + ',' + y, c);
           break;
         }
-        case 'spikes': {
-          const s = this.spikeGroup.create(px, py - 8, 'spikes');
-          s.body.setSize(14, 8).setOffset(1, 8);
-          s.abyss = ent.abyss;
+        case 'spikes':
+          this.sg.create(px, py - 8, 'spikes').ad = a;
           break;
-        }
         case 'veil': {
-          const v = this.add.tileSprite(ent.x * T, ent.y * T, ent.w * T, ent.h * T, 'veil').setOrigin(0).setDepth(3);
-          this.veilGroup.add(v);
-          v.strength = 1;
-          v.rect = new Phaser.Geom.Rectangle(ent.x * T, ent.y * T, ent.w * T, ent.h * T);
-          this.veils.push(v);
+          const v = this.add.tileSprite(px - 8, py, a * T, b * T, 'veil').setOrigin(0).setDepth(3);
+          this.vg.add(v);
+          v.sn = 1;
+          v.rc = new Phaser.Geom.Rectangle(px - 8, py, a * T, b * T);
+          this.vl.push(v);
           break;
         }
         case 'tool':
-          this.spawnPickup(ent.tool, px, py - 10, 0, 0, null);
+          this.sp(a, px, py - 10, 0, 0);
           break;
         case 'shade':
-          this.spawnShade(px, py);
+          this.sm(this.sh, px, py, 'shade', 'eyes', 3, 10, 28, 3, 4).setOrigin(0.5, 1).dr = random() < 0.5 ? -1 : 1;
           break;
-        case 'bat':
-          this.spawnBat(px, ent.y * T + 8);
-          break;
+        case 'bat': {
+          const m = this.sm(this.bc, px, py + 8, 'bat', 'eyes_small', 1, 12, 6, 2, 1);
+          m.hm = { x: px, y: py + 8 };
+          m.md = 'hover';
+          m.t = random() * 10;
+          m.mu = 0;
+        }
       }
     }
+    for (const s of this.sg.getChildren()) s.body.setSize(14, 8).setOffset(1, 8);
 
-    this.physics.add.collider(this.shades, this.layer);
-    this.physics.add.collider(this.shades, this.crackedGroup);
-    this.physics.add.collider(this.shades, this.veilGroup);
-    this.physics.add.collider(this.pickups, this.layer);
-    this.physics.add.collider(this.pickups, this.crackedGroup);
+    physics.collider(this.sh, this.ly);
+    physics.collider(this.sh, this.cg);
+    physics.collider(this.sh, this.vg);
+    physics.collider(this.pc, this.ly);
+    physics.collider(this.pc, this.cg);
   }
 
-  addFlame(x, y, r) {
-    this.add.sprite(x, y, 'flame').setOrigin(0.5, 1).setDepth(60).play({ key: 'flame', startFrame: Phaser.Math.Between(0, 1) });
-    if (r) this.lights.push({ x, y, r, flicker: true });
+  // A static light source; `glow` adds a faint additive halo under the darkness.
+  al(x, y, r, flicker = true, glow = true) {
+    const l = { x, y, r };
+    l.fl = flicker;
+    if (glow) l.gw = image(this, x, y, 'light', 45).setBlendMode(1).setScale((r * 1.1) / 64).setAlpha(0.07);
+    this.lh.push(l);
+    return l;
   }
 
-  lightShrine(shrine, silent) {
-    shrine.lit = true;
-    shrine.sprite.setTexture('shrine_lit');
-    for (const dx of [-5, 1, 7]) this.addFlame(shrine.x + dx - 0.5, shrine.y - 17 + (dx === 1 ? -2 : 0), 0);
-    const l = { x: shrine.x, y: shrine.y - 16, r: 80, flicker: true };
-    this.lights.push(l);
-    if (this.dark) {
-      l.glow = this.add.image(l.x, l.y, 'light').setBlendMode(Phaser.BlendModes.ADD).setDepth(45).setScale(88 / 64).setAlpha(0.07);
-    }
+  af(x, y, r) {
+    this.add.sprite(x, y, 'flame').setOrigin(0.5, 1).setDepth(60).play({ key: 'flame', startFrame: between(0, 1) });
+    if (r) this.al(x, y, r);
+  }
+
+  ls(shrine, silent) {
+    shrine.li = true;
+    shrine.setTexture('shrine_lit');
+    for (const dx of [-5, 1, 7]) this.af(shrine.x + dx - 0.5, shrine.y - 17 + (dx === 1 ? -2 : 0));
+    this.al(shrine.x, shrine.y - 16, 80);
     if (!silent) {
-      audio.play('checkpoint');
-      this.message('Las velas te recuerdan.');
+      sound('checkpoint');
+      this.ms('Las velas te recuerdan.');
     }
   }
 
-  spawnShade(x, y) {
-    const s = this.shades.create(x, y, 'shade', 0);
-    s.setOrigin(0.5, 1).setDepth(12);
-    s.body.setSize(10, 28).setOffset(3, 4);
-    s.kind = 'shade';
-    s.hp = 3;
-    s.dir = Math.random() < 0.5 ? -1 : 1;
-    s.chasing = false;
-    s.stunUntil = 0;
-    s.burning = 0;
-    s.eyes = this.add.image(x, y, 'eyes').setDepth(60);
-    s.play('shade-walk');
-    return s;
+  // Shades are `tall`: their middle is well above their feet.
+  sm(group, x, y, key, eyes, hp, w, h, ox, oy) {
+    const m = group.create(x, y, key, 0).setDepth(12);
+    m.body.setSize(w, h).setOffset(ox, oy);
+    m.tl = hp > 1;
+    m.hp = hp;
+    m.su = m.br = 0;
+    m.cs = false;
+    m.ey = image(this, x, y, eyes, 60);
+    return m.play(m.tl ? 'shade-walk' : 'bat-fly');
   }
 
-  spawnBat(x, y) {
-    const b = this.bats.create(x, y, 'bat', 0);
-    b.setDepth(12);
-    b.body.setAllowGravity(false);
-    b.body.setSize(12, 6).setOffset(2, 1);
-    b.kind = 'bat';
-    b.hp = 1;
-    b.home = { x, y };
-    b.state = 'hover';
-    b.t = Math.random() * 10;
-    b.stateUntil = 0;
-    b.burning = 0;
-    b.eyes = this.add.image(x, y, 'eyes_small').setDepth(60);
-    b.play('bat-fly');
-    return b;
+  sp(tool, x, y, vx, vy, expires) {
+    const p = this.pc.create(x, y, 'tool_' + tool).setDepth(14).setBounce(0.35).setDragX(160).setVelocity(vx, vy).setScale(1.7);
+    p.body.setSize(16, 16);
+    p.tc = tool;
+    p.ex = expires;
+    p.pa = this.time.now + (expires ? 500 : 0);
+    // Warm additive halo plus a sprite glow so tools pop out of the dark.
+    p.gw = image(this, x, y, 'light', 45).setBlendMode(1).setScale(0.8).setAlpha(0.22).setTint(0xffe066);
+    if (p.preFX) p.preFX.addGlow(0xffe066, 3, 0, false, 0.08, 18);
+    p.once('destroy', () => p.gw.destroy());
   }
 
-  spawnPickup(tool, x, y, vx, vy, expires) {
-    const p = this.pickups.create(x, y, `tool_${tool}`);
-    p.setDepth(14);
-    p.body.setSize(12, 12);
-    p.setBounce(0.35);
-    p.setDragX(160);
-    p.setVelocity(vx, vy);
-    p.tool = tool;
-    p.expires = expires;
-    p.pickableAt = this.time.now + (expires ? 500 : 0);
-    return p;
-  }
+  bp() {
+    const physics = this.physics.add;
+    const p = (this.pl = physics.sprite(5.5 * T, 26 * T, 'child', 0));
+    p.setOrigin(0.5, 1).setDepth(10).setCollideWorldBounds(true);
+    p.body.setSize(10, 20).setOffset(3, 4).setMaxVelocityY(620);
 
-  buildPlayer() {
-    const p = (this.player = this.physics.add.sprite(this.spawn.x, this.spawn.y, 'child', 0));
-    p.setOrigin(0.5, 1).setDepth(10);
-    p.body.setSize(10, 20).setOffset(3, 4);
-    p.setCollideWorldBounds(true);
-    p.body.setMaxVelocityY(620);
-
-    this.held = this.add.image(p.x, p.y, 'tool_flashlight').setDepth(11);
-    this.umbrellaOpen = this.add.image(p.x, p.y, 'umbrella_open').setDepth(11).setVisible(false);
-    this.reticle = this.add.image(p.x, p.y, 'reticle').setDepth(62).setVisible(false);
+    this.hl = image(this, 0, 0, 'tool_flashlight', 11);
+    this.uo = image(this, 0, 0, 'umbrella_open', 11).setVisible(false);
+    this.rt = image(this, 0, 0, 'reticle', 62).setVisible(false);
 
     // The beam row being dropped through stops holding the child up.
-    this.physics.add.collider(p, this.layer, null, (_, t) => t.index !== TILE.BEAM || t.y !== this.dropRow);
-    this.physics.add.collider(p, this.crackedGroup);
-    this.physics.add.collider(p, this.veilGroup);
-    this.physics.add.overlap(p, this.shades, (_, m) => this.onMonsterTouch(m));
-    this.physics.add.overlap(p, this.bats, (_, m) => this.onMonsterTouch(m));
-    this.physics.add.overlap(p, this.spikeGroup, (_, s) => this.onSpikes(s));
-    this.physics.add.overlap(p, this.pickups, (_, item) => this.collect(item));
+    physics.collider(p, this.ly, null, (_, t) => t.index !== TILE_BEAM || t.y !== this.dp);
+    physics.collider(p, this.cg);
+    physics.collider(p, this.vg);
+    const touch = (_, m) => m.dy || !m.active || this.ht(m.x);
+    physics.overlap(p, this.sh, touch);
+    physics.overlap(p, this.bc, touch);
+    physics.overlap(p, this.sg, (_, s) => this.op(s));
+    physics.overlap(p, this.pc, (_, item) => this.ce(item));
   }
 
-  buildDarkness() {
-    const { width, height } = this.scale;
-    this.dark = this.add.renderTexture(0, 0, width, height).setOrigin(0).setScrollFactor(0).setDepth(50);
+  bd() {
+    this.dk = this.add.renderTexture(0, 0, SCREEN_W, SCREEN_H).setOrigin(0).setScrollFactor(0).setDepth(50);
     // Additive glow under the darkness so light visibly lights the rain and stone.
-    const ADD = Phaser.BlendModes.ADD;
-    this.coneGlow = this.add.image(0, 0, 'cone').setOrigin(0, 0.5).setBlendMode(ADD).setDepth(45).setVisible(false);
-    this.auraGlow = this.add.image(0, 0, 'light').setBlendMode(ADD).setDepth(45).setAlpha(0.05);
-    for (const l of this.lights) {
-      l.glow = this.add.image(l.x, l.y, 'light').setBlendMode(ADD).setDepth(45).setScale((l.r * 1.1) / 64).setAlpha(0.07);
-    }
-    this.dropBars = this.add.graphics().setDepth(61);
+    this.cn = image(this, 0, 0, 'cone', 45, 0, 0.5).setBlendMode(1).setVisible(false);
+    this.ag = image(this, 0, 0, 'light', 45).setBlendMode(1).setAlpha(0.05).setScale(0.8);
+    this.ds = this.add.graphics().setDepth(61);
   }
 
-  buildHud() {
-    // The HUD lives in its own scene so the darkness, vignette and glitch
-    // filters never dim it. It fades out on its own when nothing changes.
-    this.hud = this.scene.get('Hud');
-    this.scene.launch('Hud');
-    this.events.once('shutdown', () => this.scene.stop('Hud'));
+  mn() {
+    return [...this.sh.getChildren(), ...this.bc.getChildren()];
   }
 
-  buildInput() {
-    // Ignore whatever was pressed on the title screen.
-    clearTaps();
+  ta(px, py) {
+    const tx = floor(px / T);
+    const ty = floor(py / T);
+    return tx < 0 || ty < 0 || tx >= W || ty >= H || this.cr.has(tx + ',' + ty) ? SOLID : this.ln.grid[ty][tx];
   }
 
-  tileAt(px, py) {
-    const tx = Math.floor(px / T);
-    const ty = Math.floor(py / T);
-    if (tx < 0 || ty < 0 || tx >= W || ty >= H) return SOLID;
-    if (this.cracked.has(`${tx},${ty}`)) return SOLID;
-    return this.world.grid[ty][tx];
+  // Solid ground or a beam: something to stand on.
+  fa(px, py) {
+    return this.ta(px, py) > EMPTY;
   }
 
-  solidAt(px, py) {
-    return this.tileAt(px, py) === SOLID;
-  }
-
-  lineOfSight(x0, y0, x1, y1) {
-    const d = Math.hypot(x1 - x0, y1 - y0);
-    const n = Math.ceil(d / 8);
+  lo(x0, y0, x1, y1) {
+    const n = ceil(hypot(x1 - x0, y1 - y0) / 8);
     for (let i = 1; i < n; i++) {
-      const t = i / n;
-      if (this.solidAt(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)) return false;
+      if (this.ta(x0 + ((x1 - x0) * i) / n, y0 + ((y1 - y0) * i) / n) === SOLID) return false;
     }
     return true;
   }
 
-  groundBelow(x, y) {
-    for (let ty = Math.floor(y / T); ty < H; ty++) {
-      const v = this.tileAt(x, ty * T + 1);
-      if (v === SOLID || v === BEAM) return ty * T;
-    }
+  gb(x, y) {
+    for (let ty = floor(y / T); ty < H; ty++) if (this.fa(x, ty * T + 1)) return ty * T;
     return null;
   }
 
-  message(text, ms = 3500) {
-    if (this.hud) this.hud.showMessage(text, ms);
+  ms(text, ms) {
+    this.hd.sq(text, ms);
   }
 
-  hint(id, text, ms) {
-    if (this.hintsShown.has(id)) return;
-    this.hintsShown.add(id);
-    this.message(text, ms);
+  hn(id, text, ms) {
+    if (this.hs.has(id)) return;
+    this.hs.add(id);
+    this.ms(text, ms);
   }
 
-  bleed(x, y, n, decals = 2) {
-    this.bloodFx.emitParticleAt(x, y, n);
+  // Camera shake, with a glitch burst when `glitch` is given.
+  jl(ms, amount, glitch) {
+    this.cm.shake(ms, amount);
+    if (glitch) this.gl.hi(glitch);
+  }
+
+  bl(x, y, n, decals = 2) {
+    this.bf.emitParticleAt(x, y, n);
     for (let i = 0; i < decals; i++) {
-      const dx = x + Phaser.Math.Between(-18, 18);
-      const gy = this.groundBelow(dx, y);
+      const dx = x + between(-18, 18);
+      const gy = this.gb(dx, y);
       if (gy === null || gy - y > 120) continue;
-      const d = this.add.image(dx, gy, `splat${Phaser.Math.Between(0, 2)}`).setOrigin(0.5, 1).setDepth(4);
-      d.setFlipX(Math.random() < 0.5);
-      this.decals.push(d);
-      if (this.decals.length > 80) this.decals.shift().destroy();
+      this.dc.push(image(this, dx, gy, 'splat' + between(0, 2), 4, 0.5, 1).setFlipX(random() < 0.5));
+      if (this.dc.length > 80) this.dc.shift().destroy();
     }
   }
 
-  equip(tool) {
-    if (tool && !this.inventory.has(tool)) return;
-    if (tool === this.equipped) return;
-    this.equipped = tool;
-    audio.play('poke');
-    if (this.hud) this.hud.pulse();
+  ct(dir) {
+    const owned = TOOLS.filter((t) => this.iv.has(t));
+    const tool = owned[(owned.indexOf(this.eq) + dir + owned.length) % owned.length];
+    if (!tool || tool === this.eq) return;
+    this.eq = tool;
+    sound('poke');
+    this.hd.ps();
   }
 
-  cycleTool(dir) {
-    const owned = TOOLS.filter((t) => this.inventory.has(t));
-    if (!owned.length) return;
-    const i = owned.indexOf(this.equipped);
-    this.equip(owned[(i + dir + owned.length) % owned.length]);
-  }
-
-  collect(item) {
-    if (this.dead || this.time.now < item.pickableAt) return;
-    const tool = item.tool;
-    const first = !this.found.has(tool);
-    this.found.add(tool);
-    this.inventory.add(tool);
-    this.equipped = tool;
-    if (this.hud) this.hud.pulse();
+  ce(item) {
+    if (this.dd || this.time.now < item.pa) return;
+    const tool = item.tc;
+    const first = !this.fn.has(tool);
+    this.fn.add(tool);
+    this.iv.add(tool);
+    this.eq = tool;
+    this.hd.ps();
     item.destroy();
     if (first) {
-      audio.play('newtool');
-      this.glitch.hit(0.4);
-      if (tool === 'crowbar') this.message('PATA DE CABRA - pulsa BOTON 2 para golpear. La piedra agrietada cede.', 5000);
-      if (tool === 'umbrella') this.message('PARAGUAS - manten BOTON 1 al caer para planear.', 5000);
-      if (tool === 'revolver') this.hearts = MAX_HEARTS;
+      sound('newtool');
+      this.gl.hi(0.4);
+      if (tool === 'crowbar') this.ms('PATA DE CABRA - pulsa BOTON 2 para golpear. La piedra agrietada cede.', 5000);
+      if (tool === 'umbrella') this.ms('PARAGUAS - manten BOTON 1 al caer para planear.', 5000);
+      if (tool === 'revolver') this.hr = MAX_HEARTS;
     } else {
-      audio.play('pickup');
-      this.message(`Recuperaste: ${TOOL_NAMES[tool]}.`, 1800);
+      sound('pickup');
+      this.ms(`Recuperaste: ${TOOL_NAMES[tool]}.`, 1800);
     }
   }
 
-  dropTool(dir) {
-    const tool = this.equipped;
-    this.inventory.delete(tool);
-    this.equipped = null;
-    this.spawnPickup(tool, this.player.x, this.player.y - 14, -dir * Phaser.Math.Between(40, 90), -220, this.time.now + DROP_TIME);
-    audio.play('drop');
-    if (this.hud) this.hud.pulse();
-    if (!this.hintsShown.has('drop')) {
-      this.hint('drop', `¡Soltaste: ${TOOL_NAMES[tool]}! Recogela antes de que la oscuridad se la lleve.`, 3500);
-    } else {
-      this.message(`¡Soltaste: ${TOOL_NAMES[tool]}!`, 1500);
-    }
+  dt(dir) {
+    const tool = this.eq;
+    const text = `¡Soltaste: ${TOOL_NAMES[tool]}!`;
+    this.iv.delete(tool);
+    this.eq = null;
+    this.sp(tool, this.pl.x, this.pl.y - 14, -dir * between(40, 90), -220, this.time.now + DROP_TIME);
+    sound('drop');
+    this.hd.ps();
+    if (this.hs.has('drop')) this.ms(text, 1500);
+    else this.hn('drop', text + ' Recogela antes de que la oscuridad se la lleve.', 3500);
   }
 
   // A dropped tool that timed out crawls back to the last lit shrine.
-  reclaim(item) {
-    this.glitchFx.emitParticleAt(item.x, item.y, 24);
-    audio.play('lost');
-    this.glitch.hit(0.3);
-    const cp = this.checkpoint;
-    item.setPosition(cp.x + 16, cp.y - 10);
-    item.setVelocity(0, 0);
-    item.expires = null;
-    item.setAlpha(1);
-    this.message(`La oscuridad se llevo: ${TOOL_NAMES[item.tool]}... te espera junto a las velas.`, 3500);
+  rl(item) {
+    this.gf.emitParticleAt(item.x, item.y, 24);
+    sound('lost');
+    this.gl.hi(0.3);
+    item.setPosition(this.ch.x + 16, this.ch.y - 10).setVelocity(0, 0).setAlpha(1);
+    item.ex = null;
+    this.ms(`La oscuridad se llevo: ${TOOL_NAMES[item.tc]}... te espera junto a las velas.`, 3500);
   }
 
-  updateTools(dt, time) {
-    const p = this.player;
-    const useDown = tap(...BTN.use);
-    const useHeld = down(...BTN.use);
-    const f = this.facing;
-    const ax = this.aim.x;
-    const ay = this.aim.y;
-    const aimAng = this.aimAngle;
-    this.attackCooldown -= dt;
-    this.focus = false;
-    this.cone = null;
+  ul(dt, time) {
+    const p = this.pl;
+    const tool = this.eq;
+    const f = this.fc;
+    const ax = this.ax;
+    const ay = this.ay;
+    const angle = this.aa;
+    const useDown = tap(B_USE);
+    this.ac -= dt;
+    this.fs = false;
+    this.co = null;
 
-    this.umbrellaOpen.setVisible(this.gliding);
-    this.held.setVisible(!!this.equipped && !this.gliding && !this.dead);
-    if (!this.equipped) return;
+    this.uo.setVisible(this.gd).setPosition(p.x, p.y - 30);
+    this.hl.setVisible(!!tool && !this.gd && !this.dd);
+    if (!tool) return;
 
-    this.held.setTexture(`tool_${this.equipped}`).setFlipX(!this.aiming && f < 0);
-    const swingT = Math.max(0, (this.swingUntil - time) / 180);
+    const swingT = max(0, (this.sw - time) / 180);
+    // Starts an attack if the button was pressed and the last one has finished.
+    const attack = (cooldown, sfxName) => {
+      if (!useDown || this.ac > 0) return false;
+      this.ac = cooldown;
+      this.sw = time + 180;
+      sound(sfxName);
+      return true;
+    };
+    let [reach, height, scale] = TOOL_HOLD[tool];
+    let tilt = 0; // extra rotation while swinging
 
-    switch (this.equipped) {
-      case 'flashlight': {
-        this.held.setPosition(p.x + ax * 8, p.y - 11 + ay * 8).setScale(0.6).setRotation(this.aiming ? aimAng : 0);
-        this.focus = useHeld;
-        if (Math.random() < 0.008) this.flicker = 0;
-        this.flicker = Math.min(1, this.flicker + dt * 6);
-        if (this.flicker > 0.5 && !this.dead) {
-          this.cone = {
-            x: p.x + ax * 12,
-            y: p.y - 11 + ay * 12,
-            angle: aimAng,
-            range: this.focus ? 270 : 190,
-            half: this.focus ? 0.2 : 0.4,
-            power: this.focus ? 2.4 : 1,
-          };
-          this.shineCone(this.cone, dt);
-        }
-        break;
+    if (tool === 'flashlight') {
+      const focus = (this.fs = down(B_USE));
+      if (random() < 0.008) this.fl = 0;
+      this.fl = min(1, this.fl + dt * 6);
+      if (this.fl > 0.5 && !this.dd) {
+        this.co = { x: p.x + ax * 12, y: p.y - 11 + ay * 12, angle, range: focus ? 270 : 190, half: focus ? 0.2 : 0.4, power: focus ? 2.4 : 1 };
+        this.s0(this.co, dt);
       }
-      case 'crowbar': {
-        const tilt = swingT > 0 ? Phaser.Math.Linear(1.9, -1.2, 1 - swingT) : 0.5;
-        this.held.setPosition(p.x + ax * 7, p.y - 10 + ay * 7).setScale(0.8).setRotation(this.aiming ? aimAng + tilt : f * tilt);
-        if (useDown && this.attackCooldown <= 0) {
-          this.attackCooldown = 0.38;
-          this.swingUntil = time + 180;
-          audio.play('swing');
-          this.strike(this.aimBox(2, 30, 46), 2, 220, true);
-        }
-        break;
+    } else if (tool === 'crowbar') {
+      tilt = swingT ? 3.1 * swingT - 1.2 : 0.5;
+      if (attack(0.38, 'swing')) this.sr(this.ab(30, 46), 2, 220, true);
+    } else if (tool === 'revolver') {
+      tilt = -0.6 * swingT;
+      if (attack(0.45, 'shot')) {
+        this.jl(70, 0.006);
+        const x0 = p.x + ax * 14;
+        const y0 = p.y - 12 + ay * 14;
+        const shot = new Phaser.Geom.Line(x0, y0, x0 + cos(angle) * 420, y0 + sin(angle) * 420);
+        const tracer = this.add.graphics().setDepth(61).lineStyle(1, 0xffffff, 0.9).strokeLineShape(shot);
+        later(this, 50, () => tracer.destroy());
+        const b = this.bs;
+        if (b && !b.dy && Phaser.Geom.Intersects.LineToRectangle(shot, b.getBounds())) this.hb(sign(b.x - p.x));
       }
-      case 'revolver': {
-        const kick = swingT > 0 ? -0.6 * swingT : 0;
-        this.held.setPosition(p.x + ax * 9, p.y - 11 + ay * 9).setScale(0.8).setRotation(this.aiming ? aimAng + kick : f * kick);
-        if (useDown && this.attackCooldown <= 0) {
-          this.attackCooldown = 0.45;
-          this.swingUntil = time + 180;
-          audio.play('shot');
-          this.cameras.main.shake(70, 0.006);
-          const x0 = p.x + ax * 14;
-          const y0 = p.y - 12 + ay * 14;
-          const shot = new Phaser.Geom.Line(x0, y0, x0 + Math.cos(aimAng) * 420, y0 + Math.sin(aimAng) * 420);
-          const tracer = this.add.graphics().setDepth(61).lineStyle(1, 0xffffff, 0.9).strokeLineShape(shot);
-          this.time.delayedCall(50, () => tracer.destroy());
-          const b = this.boss;
-          if (b && !b.dying && Phaser.Geom.Intersects.LineToRectangle(shot, b.getBounds())) this.hitBoss(Math.sign(b.x - p.x));
-        }
-        break;
-      }
-      case 'umbrella': {
-        const thrust = swingT > 0 ? 8 * swingT : 0;
-        this.held.setPosition(p.x + ax * (6 + thrust), p.y - 10 + ay * (6 + thrust)).setScale(0.7).setRotation(this.aiming ? aimAng + 1.57 : f * 1.57);
-        if (useDown && this.attackCooldown <= 0) {
-          this.attackCooldown = 0.4;
-          this.swingUntil = time + 180;
-          audio.play('poke');
-          this.strike(this.aimBox(2, 26, 16), 1, 320, false);
-        }
-        break;
-      }
+    } else {
+      reach += 8 * swingT;
+      tilt = 1.57;
+      if (attack(0.4, 'poke')) this.sr(this.ab(26, 16), 1, 320);
     }
-    if (this.gliding) this.umbrellaOpen.setPosition(p.x, p.y - 30);
+    this.hl
+      .setTexture('tool_' + tool)
+      .setFlipX(!this.am && f < 0)
+      .setPosition(p.x + ax * reach, p.y - height + ay * reach)
+      .setScale(scale)
+      .setRotation(this.am ? angle + tilt : f * tilt);
   }
 
   // Axis-aligned hitbox extending from the player along the current aim vector.
   // `len` runs along the aim, `wide` across it; 8-way aim keeps it corner-correct.
-  aimBox(reach, len, wide) {
-    const { x: ax, y: ay } = this.aim;
-    const along = reach + len / 2;
-    const cx = this.player.x + ax * along;
-    const cy = this.player.y - 12 + ay * along;
-    const w = Math.abs(ax) * len + Math.abs(ay) * wide;
-    const h = Math.abs(ay) * len + Math.abs(ax) * wide;
-    return new Phaser.Geom.Rectangle(cx - w / 2, cy - h / 2, w, h);
+  ab(len, wide) {
+    const ax = this.ax;
+    const ay = this.ay;
+    const along = 2 + len / 2;
+    const w = abs(ax) * len + abs(ay) * wide;
+    const h = abs(ay) * len + abs(ax) * wide;
+    return new Phaser.Geom.Rectangle(this.pl.x + ax * along - w / 2, this.pl.y - 12 + ay * along - h / 2, w, h);
   }
 
   // Melee hit on everything inside `box`.
-  strike(box, dmg, knock, breaks) {
+  sr(box, dmg, knock, breaks) {
+    const hits = (o) => Phaser.Geom.Intersects.RectangleToRectangle(box, o.getBounds());
     let hitSomething = false;
-    const hitMonster = (m) => {
-      if (!m.active || m.dying) return;
-      if (Phaser.Geom.Intersects.RectangleToRectangle(box, m.getBounds())) {
-        this.damage(m, dmg, (this.aim.x || this.facing) * knock);
+    for (const m of this.mn()) {
+      if (m.active && !m.dy && hits(m)) {
+        this.dm(m, dmg, (this.ax || this.fc) * knock);
         hitSomething = true;
       }
-    };
-    this.shades.getChildren().slice().forEach(hitMonster);
-    this.bats.getChildren().slice().forEach(hitMonster);
+    }
 
     let clang = false;
-    for (const c of [...this.cracked.values()]) {
-      if (Phaser.Geom.Intersects.RectangleToRectangle(box, c.getBounds())) {
-        if (breaks) this.crumble(c.tx, c.ty);
+    for (const c of [...this.cr.values()]) {
+      if (hits(c)) {
+        if (breaks) this.cl(c.tx, c.ty);
         else clang = true;
       }
     }
-    if (clang) audio.play('clang');
-    if (hitSomething) this.cameras.main.shake(80, 0.004);
+    if (clang) sound('clang');
+    if (hitSomething) this.jl(80, 0.004);
   }
 
   // Break a cracked block and, a beat later, everything cracked touching it.
-  crumble(tx, ty) {
-    const key = `${tx},${ty}`;
-    const c = this.cracked.get(key);
+  cl(tx, ty) {
+    const key = tx + ',' + ty;
+    const c = this.cr.get(key);
     if (!c) return;
-    this.cracked.delete(key);
-    this.debrisFx.emitParticleAt(c.x, c.y, 8);
+    this.cr.delete(key);
+    this.df.emitParticleAt(c.x, c.y, 8);
     c.destroy();
-    if (!this.crumbling) {
-      this.crumbling = true;
-      audio.play('crumble');
-      this.cameras.main.shake(250, 0.008);
-      this.glitch.hit(0.3);
-      this.time.delayedCall(300, () => (this.crumbling = false));
+    if (!this.cb) {
+      this.cb = true;
+      sound('crumble');
+      this.jl(250, 0.008, 0.3);
+      later(this, 300, () => (this.cb = false));
     }
-    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      if (this.cracked.has(`${tx + dx},${ty + dy}`)) this.time.delayedCall(60, () => this.crumble(tx + dx, ty + dy));
-    }
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) later(this, 60, () => this.cl(tx + dx, ty + dy));
   }
 
-  inCone(cone, x, y) {
+  ic(cone, x, y) {
     const dx = x - cone.x;
     const dy = y - cone.y;
-    const d = Math.hypot(dx, dy);
-    if (d > cone.range) return false;
-    const diff = Math.abs(Phaser.Math.Angle.Wrap(Math.atan2(dy, dx) - cone.angle));
-    return diff < cone.half && this.lineOfSight(cone.x, cone.y, x, y);
+    return (
+      hypot(dx, dy) <= cone.range &&
+      abs(Phaser.Math.Angle.Wrap(atan2(dy, dx) - cone.angle)) < cone.half &&
+      this.lo(cone.x, cone.y, x, y)
+    );
   }
 
-  shineCone(cone, dt) {
-    const burn = (m) => {
-      if (!m.active || m.dying) return;
-      const cy = m.kind === 'shade' ? m.y - 18 : m.y;
-      if (this.inCone(cone, m.x, cy)) {
-        m.burning = 0.15;
-        m.hp -= dt * cone.power * (m.kind === 'bat' ? 2.5 : 1.1);
-        if (Math.random() < 0.3) this.smokeFx.emitParticleAt(m.x, cy, 1);
-        if (Math.random() < 0.15) this.emberFx.emitParticleAt(m.x, cy, 1);
-        if (!m.shriekAt || this.time.now > m.shriekAt) {
-          m.shriekAt = this.time.now + 900;
-          audio.play(m.kind === 'bat' ? 'screech' : 'burn');
-        }
-        if (m.hp <= 0) this.kill(m);
+  s0(cone, dt) {
+    const now = this.time.now;
+    for (const m of this.mn()) {
+      const cy = m.y - (m.tl ? 18 : 0);
+      if (!m.active || m.dy || !this.ic(cone, m.x, cy)) continue;
+      m.br = 0.15;
+      m.hp -= dt * cone.power * (m.tl ? 1.1 : 2.5);
+      if (random() < 0.3) this.s3.emitParticleAt(m.x, cy, 1);
+      if (random() < 0.15) this.ef.emitParticleAt(m.x, cy, 1);
+      if (!m.sd || now > m.sd) {
+        m.sd = now + 900;
+        sound(m.tl ? 'burn' : 'screech');
       }
-    };
-    this.shades.getChildren().slice().forEach(burn);
-    this.bats.getChildren().slice().forEach(burn);
+      if (m.hp <= 0) this.kl(m);
+    }
 
-    for (const v of this.veils) {
-      if (v.strength <= 0) continue;
+    for (const v of this.vl) {
+      if (v.sn <= 0) continue;
       let lit = false;
       for (const off of [-0.6, -0.3, 0, 0.3, 0.6]) {
         const a = cone.angle + off * cone.half;
         for (let d = 8; d < cone.range && !lit; d += 8) {
-          const x = cone.x + Math.cos(a) * d;
-          const y = cone.y + Math.sin(a) * d;
-          if (v.rect.contains(x, y)) lit = true;
-          else if (this.solidAt(x, y)) break;
+          const x = cone.x + cos(a) * d;
+          const y = cone.y + sin(a) * d;
+          if (v.rc.contains(x, y)) lit = true;
+          else if (this.ta(x, y) === SOLID) break;
         }
-        if (lit) break;
       }
       if (!lit) continue;
-      v.strength -= dt * (this.focus ? 0.9 : 0.35);
-      v.hurt = 0.2;
-      if (Math.random() < 0.2) this.glitchFx.emitParticleAt(v.rect.centerX, Phaser.Math.Between(v.rect.top, v.rect.bottom), 1);
-      if (Math.random() < 0.05) audio.play('burn');
-      if (v.strength <= 0) this.dissolveVeil(v);
-      else this.hint('veil-focus', 'Retrocede ante la luz... manten BOTON 2 para enfocar el haz.');
+      v.sn -= dt * (this.fs ? 0.9 : 0.35);
+      v.ht = 0.2;
+      if (random() < 0.2) this.gf.emitParticleAt(v.rc.centerX, between(v.rc.top, v.rc.bottom), 1);
+      if (random() < 0.05) sound('burn');
+      if (v.sn <= 0) this.dv(v);
+      else this.hn('veil-focus', 'Retrocede ante la luz... manten BOTON 2 para enfocar el haz.');
     }
   }
 
-  dissolveVeil(v) {
-    audio.play('veil');
-    this.glitch.hit(0.6);
-    for (let i = 0; i < 40; i++) {
-      this.glitchFx.emitParticleAt(Phaser.Math.Between(v.rect.left, v.rect.right), Phaser.Math.Between(v.rect.top, v.rect.bottom), 1);
-    }
-    this.veils = this.veils.filter((o) => o !== v);
+  dv(v) {
+    sound('veil');
+    this.gl.hi(0.6);
+    for (let i = 0; i < 40; i++) this.gf.emitParticleAt(between(v.rc.left, v.rc.right), between(v.rc.top, v.rc.bottom), 1);
+    this.vl = this.vl.filter((o) => o !== v);
     v.body.enable = false;
     this.tweens.add({ targets: v, alpha: 0, scaleX: 0.2, duration: 400, onComplete: () => v.destroy() });
   }
 
-  damage(m, dmg, knockX) {
-    m.hp -= dmg;
-    this.bleed(m.x, m.kind === 'shade' ? m.y - 18 : m.y, 14, 1);
-    audio.play('flesh');
+  // Red flash on a monster that was just hit.
+  fr(m) {
     m.setTint(0xff4444);
-    this.time.delayedCall(120, () => m.active && m.clearTint());
-    if (m.kind === 'shade') {
-      m.stunUntil = this.time.now + 350;
-      m.setVelocity(knockX, -140);
-    } else {
-      m.setVelocity(knockX, -60);
-    }
-    if (m.hp <= 0) this.kill(m);
+    later(this, 120, () => m.active && m.clearTint());
   }
 
-  kill(m) {
-    if (m.dying) return;
-    m.dying = true;
+  dm(m, dmg, knockX) {
+    m.hp -= dmg;
+    this.bl(m.x, m.y - (m.tl ? 18 : 0), 14, 1);
+    sound('flesh');
+    this.fr(m);
+    if (m.tl) m.su = this.time.now + 350;
+    m.setVelocity(knockX, m.tl ? -140 : -60);
+    if (m.hp <= 0) this.kl(m);
+  }
+
+  kl(m) {
+    if (m.dy) return;
+    m.dy = true;
     m.body.enable = false;
-    const cy = m.kind === 'shade' ? m.y - 16 : m.y;
-    this.bleed(m.x, cy, m.kind === 'shade' ? 45 : 20, m.kind === 'shade' ? 4 : 2);
-    audio.play('die');
-    this.glitch.hit(0.3);
-    this.cameras.main.shake(120, 0.006);
-    this.tweens.add({ targets: m.eyes, alpha: 0, y: m.eyes.y + 12, duration: 900, onComplete: () => m.eyes.destroy() });
-    this.tweens.add({
-      targets: m,
-      alpha: 0,
-      scaleY: m.kind === 'shade' ? 0.1 : 1,
-      angle: m.kind === 'bat' ? 180 : 0,
-      duration: 500,
-      onComplete: () => m.destroy(),
-    });
+    this.bl(m.x, m.y - (m.tl ? 16 : 0), m.tl ? 45 : 20, m.tl ? 4 : 2);
+    sound('die');
+    this.jl(120, 0.006, 0.3);
+    this.tweens.add({ targets: m.ey, alpha: 0, y: m.ey.y + 12, duration: 900, onComplete: () => m.ey.destroy() });
+    this.tweens.add({ targets: m, alpha: 0, scaleY: m.tl ? 0.1 : 1, angle: m.tl ? 0 : 180, duration: 500, onComplete: () => m.destroy() });
   }
 
-  onMonsterTouch(m) {
-    if (m.dying || !m.active) return;
-    this.hurt(m.x);
-  }
-
-  onSpikes(s) {
-    if (this.dead) return;
-    this.hurt(this.player.x + (Math.random() - 0.5));
-    if (s.abyss) {
-      if (!this.dead && !this.falling) {
-        this.falling = true;
-        this.time.delayedCall(350, () => {
-          this.falling = false;
-          if (!this.dead) this.respawnAtCheckpoint();
+  op(s) {
+    if (this.dd) return;
+    this.ht(this.pl.x + (random() - 0.5));
+    if (s.ad) {
+      if (!this.dd && !this.fg) {
+        this.fg = true;
+        later(this, 350, () => {
+          this.fg = false;
+          if (!this.dd) this.ra();
         });
       }
-    } else if (this.player.body.velocity.y >= 0) {
-      this.player.setVelocityY(-340);
+    } else if (this.pl.body.velocity.y >= 0) {
+      this.pl.setVelocityY(-340);
     }
   }
 
-  updateShade(s, dt, time) {
-    if (s.dying) return;
-    const p = this.player;
-    const onGround = s.body.blocked.down;
+  us(s, dt, time) {
+    const p = this.pl;
     const dx = p.x - s.x;
-    const dy = p.y - s.y;
-    const sees =
-      !this.dead && Math.abs(dx) < 170 && Math.abs(dy) < 50 && this.lineOfSight(s.x, s.y - 26, p.x, p.y - 12);
+    const sees = !this.dd && abs(dx) < 170 && abs(p.y - s.y) < 50 && this.lo(s.x, s.y - 26, p.x, p.y - 12);
 
-    if (sees && !s.chasing) audio.play('moan');
-    s.chasing = sees;
-    if (!s.chasing && s.dir === 0) s.dir = s.flipX ? -1 : 1;
-    s.burning = Math.max(0, s.burning - dt);
+    if (sees && !s.cs) sound('moan');
+    s.cs = sees;
+    if (!sees && !s.dr) s.dr = s.flipX ? -1 : 1;
 
-    if (time < s.stunUntil) {
-      // knocked back; let physics carry it
-    } else if (onGround) {
-      if (s.chasing) s.dir = Math.sign(dx) || s.dir;
+    // While stunned it is knocked back; let physics carry it.
+    if (time >= s.su && s.body.blocked.down) {
+      if (sees) s.dr = sign(dx) || s.dr;
       // Turn at walls and ledges (unless chasing straight at the player on the same level).
-      const ahead = s.x + s.dir * 8;
-      const floor = this.tileAt(ahead, s.y + 2);
-      const wall = s.dir > 0 ? s.body.blocked.right : s.body.blocked.left;
-      if (wall || (floor !== SOLID && floor !== BEAM)) {
-        if (s.chasing) s.dir = 0;
-        else s.dir = -s.dir;
-      }
-      let speed = s.chasing ? 64 : 26;
-      if (s.burning > 0) speed *= 0.2;
-      s.setVelocityX(s.dir * speed);
+      if ((s.dr > 0 ? s.body.blocked.right : s.body.blocked.left) || !this.fa(s.x + s.dr * 8, s.y + 2)) s.dr = sees ? 0 : -s.dr;
+      s.setVelocityX(s.dr * (sees ? 64 : 26) * (s.br > 0 ? 0.2 : 1));
     }
-    if (s.dir) s.setFlipX(s.dir < 0);
-    s.anims.timeScale = s.chasing ? 2.5 : 1;
+    if (s.dr) s.setFlipX(s.dr < 0);
+    s.anims.timeScale = sees ? 2.5 : 1;
 
-    const shake = s.burning > 0 ? Phaser.Math.Between(-1, 1) : 0;
-    s.eyes.setPosition(s.x + (s.flipX ? -1 : 1) + shake, s.y - 27.5);
-    s.eyes.setAlpha(s.burning > 0 ? 0.4 + Math.random() * 0.6 : 1);
-    s.setAlpha(s.burning > 0 ? 0.6 + Math.random() * 0.4 : 1);
+    const burning = s.br > 0;
+    s.ey.setPosition(s.x + (s.flipX ? -1 : 1) + (burning ? between(-1, 1) : 0), s.y - 27.5).setAlpha(burning ? 0.4 + random() * 0.6 : 1);
+    s.setAlpha(burning ? 0.6 + random() * 0.4 : 1);
   }
 
-  updateBat(b, dt, time) {
-    if (b.dying) return;
+  ua(b, dt, time) {
     b.t += dt;
-    b.burning = Math.max(0, b.burning - dt);
-    const p = this.player;
-    const px = p.x;
-    const py = p.y - 12;
-    const d = Phaser.Math.Distance.Between(b.x, b.y, px, py);
+    const px = this.pl.x;
+    const py = this.pl.y - 12;
+    const dist = Phaser.Math.Distance.Between;
+    // Fly towards (or with a negative speed, away from) a point.
+    const fly = (x, y, speed) => {
+      const a = atan2(y - b.y, x - b.x);
+      b.setVelocity(cos(a) * speed, sin(a) * speed);
+    };
+    const go = (mode, ms) => {
+      b.md = mode;
+      b.mu = time + ms;
+    };
 
-    if (b.burning > 0) {
-      b.state = 'return';
-      b.stateUntil = time + 1200;
-      const a = Math.atan2(b.y - py, b.x - px);
-      b.setVelocity(Math.cos(a) * 120, Math.sin(a) * 120);
-    } else if (b.state === 'hover') {
-      const tx = b.home.x + Math.sin(b.t * 1.3) * 34;
-      const ty = b.home.y + Math.sin(b.t * 2.7) * 10;
-      b.setVelocity((tx - b.x) * 3, (ty - b.y) * 3);
-      if (!this.dead && d < 150 && time > b.stateUntil && this.lineOfSight(b.x, b.y, px, py)) {
-        b.state = 'dive';
-        b.stateUntil = time + 900;
-        const a = Math.atan2(py - b.y, px - b.x);
-        b.setVelocity(Math.cos(a) * 165, Math.sin(a) * 165);
-        audio.play('screech');
+    if (b.br > 0) {
+      go('return', 1200);
+      fly(px, py, -120);
+    } else if (b.md === 'hover') {
+      b.setVelocity((b.hm.x + sin(b.t * 1.3) * 34 - b.x) * 3, (b.hm.y + sin(b.t * 2.7) * 10 - b.y) * 3);
+      if (!this.dd && dist(b.x, b.y, px, py) < 150 && time > b.mu && this.lo(b.x, b.y, px, py)) {
+        go('dive', 900);
+        fly(px, py, 165);
+        sound('screech');
       }
-    } else if (b.state === 'dive') {
-      if (time > b.stateUntil) {
-        b.state = 'return';
-        b.stateUntil = time + 1500;
-      }
+    } else if (b.md === 'dive') {
+      if (time > b.mu) go('return', 1500);
     } else {
-      const a = Math.atan2(b.home.y - b.y, b.home.x - b.x);
-      b.setVelocity(Math.cos(a) * 90, Math.sin(a) * 90);
-      if (Phaser.Math.Distance.Between(b.x, b.y, b.home.x, b.home.y) < 10 || time > b.stateUntil) {
-        b.state = 'hover';
-        b.stateUntil = time + 1500;
-      }
+      fly(b.hm.x, b.hm.y, 90);
+      if (dist(b.x, b.y, b.hm.x, b.hm.y) < 10 || time > b.mu) go('hover', 1500);
     }
     b.setFlipX(b.body.velocity.x < 0);
-    b.eyes.setPosition(b.x, b.y + 1.5);
+    b.ey.setPosition(b.x, b.y + 1.5);
   }
 
   // Returns false if the hit was ignored.
-  hurt(srcX) {
+  ht(srcX) {
     const time = this.time.now;
-    if (this.dead || this.won || this.cut || time < this.invulnUntil) return false;
-    const p = this.player;
-    this.invulnUntil = time + 1400;
-    this.stunUntil = time + 260;
-    const dir = Math.sign(p.x - srcX) || -this.facing;
+    if (this.dd || this.wn || this.cu || time < this.iu) return false;
+    const p = this.pl;
+    this.iu = time + 1400;
+    this.su = time + 260;
+    const dir = sign(p.x - srcX) || -this.fc;
     p.setVelocity(dir * 170, -230);
-    this.bleed(p.x, p.y - 12, 22, 2);
-    audio.play('hurt');
-    this.glitch.hit(0.7);
-    this.cameras.main.shake(160, 0.012);
-    if (this.hud) this.hud.pulse();
+    this.bl(p.x, p.y - 12, 22);
+    sound('hurt');
+    this.jl(160, 0.012, 0.7);
+    this.hd.ps();
 
     // El Silbon goes straight for the heart; lesser things only knock the tool away.
-    if (this.equipped && !this.boss) {
-      this.dropTool(dir);
-    } else {
-      this.hearts--;
-      if (this.hearts <= 0) this.die();
-      else if (this.boss && this.hearts === 1 && !this.found.has('revolver') && !this.thrown) this.throwRevolver();
-    }
+    if (this.eq && !this.bs) this.dt(dir);
+    else if (--this.hr <= 0) this.di();
+    else if (this.bs && this.hr === 1 && !this.fn.has('revolver') && !this.th) this.tr();
     return true;
   }
 
-  die() {
-    this.dead = true;
-    const p = this.player;
-    this.bleed(p.x, p.y - 12, 60, 5);
+  di() {
+    this.dd = true;
+    const p = this.pl;
+    this.bl(p.x, p.y - 12, 60, 5);
     p.setVisible(false);
     p.body.enable = false;
-    audio.play('death');
-    this.glitch.hit(1.2);
-    this.cameras.main.shake(400, 0.02);
-    if (this.hud) this.hud.big('TE ENCONTRARON');
-    this.time.delayedCall(2200, () => {
-      if (this.hud) this.hud.clearBig();
-      this.hearts = MAX_HEARTS;
-      this.dead = false;
+    sound('death');
+    this.jl(400, 0.02, 1.2);
+    this.hd.bi('TE ENCONTRARON');
+    later(this, 2200, () => {
+      this.hd.bi('');
+      this.hr = MAX_HEARTS;
+      this.dd = false;
       p.setVisible(true);
       p.body.enable = true;
-      if (this.boss) this.leaveArena();
-      this.respawnAtCheckpoint();
+      if (this.bs) this.la();
+      this.ra();
     });
   }
 
-  respawnAtCheckpoint() {
-    const cp = this.checkpoint;
-    this.player.setPosition(cp.x - 14, cp.y - 1);
-    this.player.setVelocity(0, 0);
-    this.invulnUntil = this.time.now + 1500;
-    this.glitch.hit(0.6);
-    audio.play('glitch');
-    if (this.hud) this.hud.pulse();
+  ra() {
+    this.pl.setPosition(this.ch.x - 14, this.ch.y - 1).setVelocity(0, 0);
+    this.iu = this.time.now + 1500;
+    this.gl.hi(0.6);
+    sound('glitch');
+    this.hd.ps();
   }
 
-  updatePlayer(dt, time) {
-    const p = this.player;
-    if (this.dead || this.won || this.cut) {
-      if (!this.dead) p.setVelocityX(0);
-      this.aiming = false;
-      this.reticle.setVisible(false);
+  ut(dt, time) {
+    const p = this.pl;
+    const body = p.body;
+    if (this.dd || this.wn || this.cu) {
+      if (!this.dd) p.setVelocityX(0);
+      this.am = false;
+      this.rt.setVisible(false);
       clearTaps();
       return;
     }
 
-    const left = down(...BTN.left);
-    const right = down(...BTN.right);
-    const up = down(...BTN.up);
-    const dn = down(...BTN.down);
-    const grounded = p.body.blocked.down;
+    const grounded = body.blocked.down;
 
-    // Free aim / focus: hold BUTTON 2 and steer with the stick. The stick drives
-    // the reticle instead of movement, so the child plants their feet while aiming.
-    const hx = (right ? 1 : 0) - (left ? 1 : 0);
-    const vy = (dn ? 1 : 0) - (up ? 1 : 0);
-    this.aiming = down(...BTN.use);
-    if (this.aiming) {
+    // Free aim / focus: hold BUTTON 2 and steer with the stick. The stick drives the
+    // reticle instead of movement, so the child plants their feet while aiming.
+    const hx = (down(B_RIGHT) ? 1 : 0) - (down(B_LEFT) ? 1 : 0);
+    const vy = (down(B_DOWN) ? 1 : 0) - (down(B_UP) ? 1 : 0);
+    const aiming = (this.am = down(B_USE));
+    if (aiming) {
       if (hx || vy) {
-        const q = Math.round(Math.atan2(vy, hx) / (Math.PI / 4)) * (Math.PI / 4);
-        this.aimAngle = q;
-        this.aim.x = Math.round(Math.cos(q));
-        this.aim.y = Math.round(Math.sin(q));
-        if (this.aim.x) this.facing = this.aim.x;
+        const q = (round(atan2(vy, hx) / (PI / 4)) * PI) / 4;
+        this.aa = q;
+        this.ax = round(cos(q));
+        this.ay = round(sin(q));
+        if (this.ax) this.fc = this.ax;
       }
     } else {
-      this.aimAngle = this.facing > 0 ? 0 : Math.PI;
-      this.aim.x = this.facing;
-      this.aim.y = 0;
+      this.aa = this.fc > 0 ? 0 : PI;
+      this.ax = this.fc;
+      this.ay = 0;
     }
-
-    const jumpDown = tap(...BTN.jump);
-    const jumpHeld = down(...BTN.jump);
-    const jumpUp = untap(...BTN.jump);
 
     if (grounded) {
-      if (!this.wasGrounded && this.lastVy > 220) audio.play('land');
-      this.lastGround = time;
+      if (!this.wg && this.lt > 220) sound('land');
+      this.lg = time;
     }
-    this.wasGrounded = grounded;
-    this.lastVy = p.body.velocity.y;
+    this.wg = grounded;
+    this.lt = body.velocity.y;
 
-    if (time > this.stunUntil) {
-      const dir = this.aiming ? 0 : (right ? 1 : 0) - (left ? 1 : 0);
+    if (time > this.su) {
+      const dir = aiming ? 0 : hx;
       p.setVelocityX(dir * RUN);
-      if (dir) this.facing = dir;
+      if (dir) this.fc = dir;
     }
 
-    if (jumpDown) this.jumpPressedAt = time;
-    if (time - this.jumpPressedAt < 120 && time - this.lastGround < 110) {
+    if (tap(B_JUMP)) this.jp = time;
+    if (time - this.jp < 120 && time - this.lg < 110) {
       p.setVelocityY(-JUMP);
-      this.jumpPressedAt = -1e9;
-      this.lastGround = -1e9;
-      audio.play('jump');
+      this.jp = this.lg = NEVER;
+      sound('jump');
     }
-    if (jumpUp && p.body.velocity.y < 0) p.setVelocityY(p.body.velocity.y * 0.45);
+    if (untap(B_JUMP) && body.velocity.y < 0) p.setVelocityY(body.velocity.y * 0.45);
 
     // Double-tap down to drop through a wooden beam.
-    const b = p.body;
-    if (tap(...BTN.down) && !this.aiming) {
-      const under = b.bottom + 1;
-      if (time - this.downAt < 300 && grounded && (this.tileAt(b.x, under) === BEAM || this.tileAt(b.right - 1, under) === BEAM)) {
-        this.dropRow = Math.floor(under / T);
-        this.dropUntil = time + 600;
-        this.downAt = this.lastGround = -1e9;
+    if (tap(B_DOWN) && !aiming) {
+      const under = body.bottom + 1;
+      if (time - this.da < 300 && grounded && (this.ta(body.x, under) === BEAM || this.ta(body.right - 1, under) === BEAM)) {
+        this.dp = floor(under / T);
+        this.du = time + 600;
+        this.da = this.lg = NEVER;
         p.setVelocityY(60);
-      } else this.downAt = time;
+      } else this.da = time;
     }
-    if (this.dropRow >= 0 && (b.y > this.dropRow * T || time > this.dropUntil)) this.dropRow = -1;
+    if (body.y > this.dp * T || time > this.du) this.dp = -1;
 
-    this.gliding = this.equipped === 'umbrella' && !grounded && jumpHeld && p.body.velocity.y > 0;
-    if (this.gliding) p.setVelocityY(Math.min(p.body.velocity.y, GLIDE_FALL));
+    this.gd = this.eq === 'umbrella' && !grounded && down(B_JUMP) && body.velocity.y > 0;
+    if (this.gd) p.setVelocityY(min(body.velocity.y, GLIDE_FALL));
 
-    if (tap(...BTN.prev)) this.cycleTool(-1);
-    if (tap(...BTN.next)) this.cycleTool(1);
-    if (tap(...BTN.mute)) audio.master.gain.value = audio.master.gain.value > 0 ? 0 : 0.9;
+    if (tap(B_PREV)) this.ct(-1);
+    if (tap(B_NEXT)) this.ct(1);
+    if (tap(B_MUTE)) master.gain.value = master.gain.value ? 0 : 0.9;
 
-    p.setFlipX(this.facing < 0);
-    if (!grounded) p.anims.play('child-jump', true);
-    else if (Math.abs(p.body.velocity.x) > 5) {
-      p.anims.play('child-run', true);
-      this.stepTimer -= dt;
-      if (this.stepTimer <= 0) {
-        this.stepTimer = 0.28;
-        audio.play('step');
-      }
-    } else p.anims.play('child-idle', true);
+    p.setFlipX(this.fc < 0);
+    const running = grounded && abs(body.velocity.x) > 5;
+    p.play(grounded ? (running ? 'child-run' : 'child-idle') : 'child-jump', true);
+    if (running && (this.se -= dt) <= 0) {
+      this.se = 0.28;
+      sound('step');
+    }
 
-    p.setAlpha(time < this.invulnUntil ? (Math.floor(time / 70) % 2 ? 0.3 : 1) : 1);
+    p.setAlpha(time < this.iu && floor(time / 70) % 2 ? 0.3 : 1);
 
-    for (const s of this.shrines) {
-      if (Math.abs(p.x - s.x) < 18 && Math.abs(p.y - s.y) < 24) {
-        if (!s.lit) this.lightShrine(s);
-        this.checkpoint = s;
-        this.hearts = MAX_HEARTS;
+    for (const s of this.sx) {
+      if (abs(p.x - s.x) < 18 && abs(p.y - s.y) < 24) {
+        if (!s.li) this.ls(s);
+        this.ch = s;
+        this.hr = MAX_HEARTS;
       }
     }
 
-    if (p.x > (27 + OX) * T && p.x < (34 + OX) * T) this.hint('veil', 'Un velo de sombra viva. Alumbralo con la linterna.');
-    if (p.x > (84 + OX) * T && p.x < (90 + OX) * T && p.y < 12 * T && !this.found.has('umbrella')) {
-      this.hint('chasm', 'Muy lejos para saltar... si tan solo algo frenara la caida.', 4000);
-    }
-    if (this.found.has('crowbar') && p.x > (40 + OX) * T && p.x < (48 + OX) * T && p.y > 20 * T && p.y < 27 * T && this.cracked.has(`${45 + OX},26`)) {
-      this.hint('floor', 'El piso aqui esta agrietado...');
-    }
-    if (grounded && p.x > (85 + OX) * T && p.x < (88 + OX) * T && p.y > 26 * T && p.y < 28 * T) {
-      this.hint('beam', 'Vigas de madera... pulsa ABAJO dos veces para bajar.');
-    }
-    if (p.x < (130 + OX) * T && p.x > (110 + OX) * T && p.y < 9 * T) this.hint('bell', 'La gran campana. Hazla sonar.');
-    if (this.aiming) this.hint('freeaim', 'APUNTADO LIBRE - manten BOTON 2 y apunta con el joystick.', 3000);
+    // Is the child inside this box (in tiles)?
+    const tx = p.x / T;
+    const ty = p.y / T;
+    const at = (x0, x1, y0, y1) => tx > x0 && tx < x1 && ty > y0 && ty < y1;
+    if (at(27, 34, 0, H)) this.hn('veil', 'Un velo de sombra viva. Alumbralo con la linterna.');
+    if (at(84, 90, 0, 12) && !this.fn.has('umbrella')) this.hn('chasm', 'Muy lejos para saltar... si tan solo algo frenara la caida.', 4000);
+    if (this.fn.has('crowbar') && at(40, 48, 20, 27) && this.cr.has('45,26')) this.hn('floor', 'El piso aqui esta agrietado...');
+    if (at(110, 130, 0, 9)) this.hn('bell', 'La gran campana. Hazla sonar.');
+    if (aiming) this.hn('freeaim', 'APUNTADO LIBRE - manten BOTON 2 y apunta con el joystick.', 3000);
 
     // Free-aim reticle.
-    const dist = 42;
-    this.reticle
-      .setVisible(this.aiming)
-      .setPosition(p.x + Math.cos(this.aimAngle) * dist, p.y - 12 + Math.sin(this.aimAngle) * dist)
-      .setRotation(this.aimAngle)
-      .setAlpha(0.55 + 0.35 * Math.sin(time / 110));
+    this.rt
+      .setVisible(aiming)
+      .setPosition(p.x + cos(this.aa) * 42, p.y - 12 + sin(this.aa) * 42)
+      .setRotation(this.aa)
+      .setAlpha(0.55 + 0.35 * sin(time / 110));
 
-    if (!this.boss && !this.cut && this.bellZone.contains(p.x, p.y - 10)) this.silbonIntro();
+    if (!this.bs && this.bz.contains(p.x, p.y - 10)) this.sv();
   }
 
-  updatePickups(time) {
-    this.dropBars.clear();
-    for (const item of this.pickups.getChildren().slice()) {
-      if (!item.expires) {
-        item.setAlpha(1);
-        continue;
+  up(time) {
+    const bars = this.ds.clear();
+    for (const item of [...this.pc.getChildren()]) {
+      const left = item.ex - time;
+      const urgent = left < 2000;
+      if (item.gw) {
+        const flash = urgent && floor(time / 80) % 2;
+        item.gw.setPosition(item.x, item.y).setScale(0.78 + 0.05 * sin(time / 240 + item.y * 0.11)).setAlpha((0.22 + 0.1 * sin(time / 190 + item.x * 0.13)) * (urgent ? (flash ? 0.5 : 1) : 1));
       }
-      const left = item.expires - time;
-      if (left <= 0) {
-        this.reclaim(item);
-        continue;
+      if (!item.ex) item.setAlpha(1);
+      else if (left <= 0) this.rl(item);
+      else {
+        item.setAlpha(urgent && floor(time / 80) % 2 ? 0.25 : 1);
+        bars.fillStyle(0, 0.8).fillRect(item.x - 11, item.y - 16, 22, 4);
+        bars.fillStyle(urgent ? 0xff1a1a : 0xffffff, 1).fillRect(item.x - 10, item.y - 15, 20 * (left / DROP_TIME), 2);
       }
-      item.setAlpha(left < 2000 ? (Math.floor(time / 80) % 2 ? 0.25 : 1) : 1);
-      const w = 20 * (left / DROP_TIME);
-      this.dropBars.fillStyle(0x000000, 0.8).fillRect(item.x - 11, item.y - 16, 22, 4);
-      this.dropBars.fillStyle(left < 2000 ? 0xff1a1a : 0xffffff, 1).fillRect(item.x - 10, item.y - 15, w, 2);
     }
   }
 
-  updateRainSplashes() {
-    const cam = this.cameras.main;
+  ur() {
+    const cam = this.cm;
     for (let i = 0; i < 4; i++) {
-      const x = cam.scrollX + Math.random() * cam.width;
-      const top = Math.max(0, Math.floor(cam.scrollY / T));
-      const bottom = Math.min(H, top + Math.ceil(cam.height / T) + 1);
-      for (let ty = top; ty < bottom; ty++) {
-        const v = this.tileAt(x, ty * T + 1);
-        if (v === SOLID || v === BEAM) {
-          this.splashFx.emitParticleAt(x, ty * T, 2);
+      const x = cam.scrollX + random() * SCREEN_W;
+      const top = max(0, floor(cam.scrollY / T));
+      for (let ty = top; ty < min(H, top + 31); ty++) {
+        if (this.fa(x, ty * T + 1)) {
+          this.s2.emitParticleAt(x, ty * T, 2);
           break;
         }
       }
     }
   }
 
-  updateDarkness(time) {
-    const cam = this.cameras.main;
-    const sx = cam.scrollX;
-    const sy = cam.scrollY;
-    const dark = this.dark;
-    const alpha = Math.max(0.32, BASE_DARK * (this.boss ? 0.6 : 1) * (1 - 0.93 * Math.min(1, this.storm.flash * 1.4)));
-    const onScreen = (x, y, r) => x + r > sx && x - r < sx + cam.width && y + r > sy && y - r < sy + cam.height;
-    const light = (x, y, r, a = 1) => {
-      if (!onScreen(x, y, r)) return;
-      dark.stamp('light', null, x - sx, y - sy, { scale: r / 64, alpha: a, erase: true });
+  ud(time) {
+    const sx = this.cm.scrollX;
+    const sy = this.cm.scrollY;
+    const dark = this.dk;
+    const flash = this.st.lv;
+    const light = (x, y, r, alpha = 1) => {
+      if (x + r > sx && x - r < sx + SCREEN_W && y + r > sy && y - r < sy + SCREEN_H) dark.stamp('light', null, x - sx, y - sy, { scale: r / 64, alpha, erase: true });
     };
 
     dark.clear();
-    dark.fill(0x000000, alpha);
+    dark.fill(0, max(0.32, BASE_DARK * (this.bs ? 0.6 : 1) * (1 - 0.93 * min(1, flash * 1.4))));
 
-    const p = this.player;
-    if (!this.dead) light(p.x, p.y - 12, 74);
-    this.auraGlow.setPosition(p.x, p.y - 12).setScale(0.8).setVisible(!this.dead);
-    for (const l of this.lights) {
-      const f = l.flicker ? 0.9 + Math.sin(time / 90 + l.x) * 0.05 + Math.random() * 0.05 : 1;
-      light(l.x, l.y, l.r * f, 1);
-      if (l.glow) l.glow.setAlpha(0.06 * f + this.storm.flash * 0.05);
+    const p = this.pl;
+    if (!this.dd) light(p.x, p.y - 12, 74);
+    this.ag.setPosition(p.x, p.y - 12).setVisible(!this.dd);
+    for (const l of this.lh) {
+      const f = l.fl ? 0.9 + sin(time / 90 + l.x) * 0.05 + random() * 0.05 : 1;
+      light(l.x, l.y, l.r * f);
+      if (l.gw) l.gw.setAlpha(0.06 * f + flash * 0.05);
     }
-    for (const item of this.pickups.getChildren()) light(item.x, item.y, 26, 0.7);
+    for (const item of this.pc.getChildren()) {
+      light(item.x, item.y, 44, 0.5);
+      light(item.x, item.y, 27, 1);
+    }
 
-    const c = this.cone;
+    const c = this.co;
+    this.cn.setVisible(!!c);
     if (c) {
       // The cone texture is 256px long with a 0.42 rad half-angle; stretch it to fit.
       const scaleX = c.range / 256;
-      dark.stamp('cone', null, c.x - sx, c.y - sy, {
-        originX: 0,
-        originY: 0.5,
-        scaleX,
-        scaleY: scaleX * (Math.tan(c.half) / Math.tan(0.42)),
-        rotation: c.angle,
-        alpha: this.flicker,
-        erase: true,
-      });
-      this.coneGlow
-        .setVisible(true)
+      const scaleY = scaleX * (tan(c.half) / tan(0.42));
+      dark.stamp('cone', null, c.x - sx, c.y - sy, { originX: 0, originY: 0.5, scaleX, scaleY, rotation: c.angle, alpha: this.fl, erase: true });
+      this.cn
         .setPosition(c.x, c.y)
-        .setScale(scaleX, scaleX * (Math.tan(c.half) / Math.tan(0.42)))
+        .setScale(scaleX, scaleY)
         .setRotation(c.angle)
-        .setAlpha((this.focus ? 0.2 : 0.12) * this.flicker);
-    } else {
-      this.coneGlow.setVisible(false);
+        .setAlpha((this.fs ? 0.2 : 0.12) * this.fl);
     }
-
-    // Deep in the cave the roof seals the world above into pure darkness.
-    if (this.player.x > (34 + OX) * T && this.player.x < (89 + OX) * T && this.player.y > CAVE_Y * T) {
-      const ceil = (CAVE_Y - 1) * T - sy;
-      if (ceil > 0) dark.fill(0x000000, 1, 0, 0, cam.width, ceil);
-    }
-  }
-
-  updateDread() {
-    let nearest = Infinity;
-    for (const m of [...this.shades.getChildren(), ...this.bats.getChildren()]) {
-      if (m.dying) continue;
-      nearest = Math.min(nearest, Phaser.Math.Distance.Between(m.x, m.y, this.player.x, this.player.y));
-    }
-    this.glitch.base = 0.04 + Math.max(0, 1 - nearest / 140) * 0.14 + (this.equipped ? 0 : 0.03);
-  }
-
-  updateParallax() {
-    const cam = this.cameras.main;
-    // Cross-fade the woods into the open llanos as the child walks east.
-    const forest = 1 - Phaser.Math.Clamp((this.player.x - (OX - 4) * T) / (14 * T), 0, 1);
-    // The trunks are locked to the screen and run the full height, so they read
-    // as the forest itself rather than drifting with the child.
-    this.forestFar.tilePositionX = cam.scrollX * 0.18;
-    this.forestFar.y = 0;
-    this.forestMid.tilePositionX = cam.scrollX * 0.5;
-    this.forestMid.y = 0;
-    this.foreTrees.tilePositionX = cam.scrollX * 1.35;
-    this.foreTrees.y = 0;
-    this.forestFar.setAlpha(forest);
-    this.forestMid.setAlpha(forest);
-    this.foreTrees.setAlpha(forest);
-    this.hills.tilePositionX = cam.scrollX * 0.1;
-    this.hills.y = 10 - cam.scrollY * 0.06;
-    this.grove.tilePositionX = cam.scrollX * 0.25;
-    this.grove.y = 21 - cam.scrollY * 0.15;
-    this.hills.setAlpha(1 - forest);
-    this.grove.setAlpha(1 - forest);
   }
 
   // He was behind you the whole time. The far-off whistle, the castle coming down, then the ruins.
-  silbonIntro() {
-    const p = this.player;
-    const cam = this.cameras.main;
-    const { width, height } = this.scale;
-    this.cut = true;
-    audio.stopMusic();
-    audio.whistle(0.03, 48, 0.4);
-    this.message('Un silbido lejano, muy lejano... el esta aqui.', 4000);
+  sv() {
+    const p = this.pl;
+    const cam = this.cm;
+    this.cu = true;
+    stopMusic();
+    whistle(0.03, 48, 0.4);
+    this.ms('Un silbido lejano, muy lejano... el esta aqui.', 4000);
 
-    const side = p.x > this.bell.x ? -1 : 1;
-    const ghost = this.add.image(p.x + side * 70, 9 * T, 'silbon', 0).setOrigin(0.5, 1).setDepth(12).setFlipX(side > 0).setAlpha(0);
-    const eyes = this.add.image(ghost.x - side * 2, ghost.y - 42.5, 'eyes').setDepth(60).setAlpha(0);
-    const white = this.add.rectangle(0, 0, width, height, 0xffffff).setOrigin(0).setScrollFactor(0).setDepth(200).setAlpha(0);
-    this.tweens.add({ targets: [ghost, eyes], alpha: 1, delay: 3000, duration: 900 });
-    this.time.delayedCall(3000, () => this.glitch.hit(0.8));
+    const side = p.x > this.ba.x ? -1 : 1;
+    const ghost = image(this, p.x + side * 70, 9 * T, 'silbon', 12, 0.5, 1, 0).setFlipX(side > 0).setAlpha(0);
+    const eyes = image(this, ghost.x - side * 2, ghost.y - 42.5, 'eyes', 60).setAlpha(0);
+    const white = whiteout(this, 200);
+    fade(this, [ghost, eyes], 1, 900, 3000);
+    later(this, 3000, () => this.gl.hi(0.8));
 
-    this.time.delayedCall(4600, () => {
+    later(this, 4600, () => {
       cam.shake(2200, 0.02);
-      this.tweens.add({ targets: white, alpha: 1, delay: 700, duration: 1400 });
-      [0, 500, 1000, 1500].forEach((d) =>
-        this.time.delayedCall(d, () => {
-          audio.play('crumble');
-          this.storm.strike(1);
-          for (let i = 0; i < 12; i++) this.debrisFx.emitParticleAt(cam.scrollX + Math.random() * width, cam.scrollY + Math.random() * height, 6);
-        }),
-      );
+      fade(this, white, 1, 1400, 700);
+      for (const d of [0, 500, 1000, 1500]) {
+        later(this, d, () => {
+          sound('crumble');
+          this.st.sr(1);
+          for (let i = 0; i < 12; i++) this.df.emitParticleAt(cam.scrollX + random() * SCREEN_W, cam.scrollY + random() * SCREEN_H, 6);
+        });
+      }
     });
 
-    this.time.delayedCall(7000, () => {
+    later(this, 7000, () => {
       ghost.destroy();
       eyes.destroy();
-      this.startArena();
-      this.tweens.add({ targets: white, alpha: 0, duration: 1200, onComplete: () => white.destroy() });
+      this.sz();
+      fade(this, white, 0, 1200, 0, () => white.destroy());
     });
+  }
+
+  // Show or hide the standing castle's skyline and fence the camera to match.
+  ss(on) {
+    const x0 = on ? ARENA_X * T : 0;
+    this.sf.setVisible(!on);
+    this.bt.setVisible(!on);
+    this.cm.setBounds(x0, 0, (on ? W - 2 : W) * T - x0, H * T);
   }
 
   // The castle is gone: flat rubble under open sky, and El Silbon.
-  startArena() {
-    const p = this.player;
-    const x0 = (ARENA_X + OX) * T;
+  sz() {
+    const p = this.pl;
+    const physics = this.physics.add;
+    const x0 = ARENA_X * T;
     const gy = ARENA_Y * T;
-    const cam = this.cameras.main;
-    this.hills.setVisible(false);
-    this.grove.setVisible(false);
-    this.forestFar.setVisible(false);
-    this.forestMid.setVisible(false);
-    this.foreTrees.setVisible(false);
-    cam.setBounds(x0, 0, (BASE_W - 2 - ARENA_X) * T, H * T);
-    this.belfryBell = this.bell;
-    if (!this.ruinBell) {
+    this.ss(true);
+    this.bb = this.ba;
+    if (!this.rb) {
       for (const [x, h, a] of [[70, 40, -8], [250, 70, 5], [400, 28, 12], [560, 56, -4]]) {
         this.add.tileSprite(x0 + x, gy + 4, 20, h, 'pillar').setOrigin(0.5, 1).setDepth(-8).setAngle(a);
       }
-      this.ruinBell = this.add.image(x0 + 480, gy + 6, 'bell').setOrigin(0.5, 1).setDepth(-6);
+      this.rb = image(this, x0 + 480, gy + 6, 'bell', -6, 0.5, 1);
     }
-    this.bell = this.ruinBell;
+    this.ba = this.rb;
 
-    this.checkpoint = { x: x0 + 110, y: gy };
-    this.hearts = MAX_HEARTS;
-    this.respawnAtCheckpoint();
-    this.facing = 1;
+    this.ch = { x: x0 + 110, y: gy };
+    this.hr = MAX_HEARTS;
+    this.ra();
+    this.fc = 1;
 
     // Built once; a lost fight hides him and the next visit to the bell brings him back.
-    if (!this.silbon) {
-      const s = (this.silbon = this.physics.add.sprite(0, 0, 'silbon', 0));
+    if (!this.sb) {
+      const s = (this.sb = physics.sprite(0, 0, 'silbon', 0));
       s.setOrigin(0.5, 1).setDepth(12).setCollideWorldBounds(true).play('silbon-walk');
       s.body.setSize(10, 42).setOffset(7, 14);
-      s.eyes = this.add.image(0, 0, 'eyes').setDepth(60);
-      this.bones = this.physics.add.group();
-      this.physics.add.collider(s, this.layer);
-      this.physics.add.collider(this.bones, this.layer, (bone) => bone.destroy());
-      this.physics.add.overlap(p, s, () => !s.dying && this.hurt(s.x));
-      this.physics.add.overlap(p, this.bones, (_, bone) => {
-        if (this.hurt(bone.x)) bone.destroy();
-      });
+      s.ey = image(this, 0, 0, 'eyes', 60);
+      this.bn = physics.group();
+      physics.collider(s, this.ly);
+      physics.collider(this.bn, this.ly, (bone) => bone.destroy());
+      physics.overlap(p, s, () => !s.dy && this.ht(s.x));
+      physics.overlap(p, this.bn, (_, bone) => this.ht(bone.x) && bone.destroy());
     }
-    const b = (this.boss = this.silbon);
-    b.setPosition(x0 + 520, gy - 1).setVelocity(0, 0).setVisible(true);
-    b.eyes.setVisible(true);
-    b.body.enable = true;
+    const b = (this.bs = this.sb);
+    b.setPosition(x0 + 520, gy - 1).setVelocity(0, 0);
+    this.sa(true);
     b.hp = BOSS_HP;
-    b.state = 'walk';
-    b.nextAt = this.time.now + 3500;
+    b.md = 'walk';
+    b.na = this.time.now + 3500;
 
-    if (this.hud) {
-      this.hud.big('EL SILBON');
-      this.time.delayedCall(2200, () => this.hud.clearBig());
-    }
-    this.time.delayedCall(1800, () => {
-      this.cut = false;
-      audio.startMusic();
+    this.hd.bi('EL SILBON');
+    later(this, 2200, () => this.hd.bi(''));
+    later(this, 1800, () => {
+      this.cu = false;
+      startMusic();
     });
+  }
+
+  sa(on) {
+    const b = this.sb;
+    b.setVisible(on);
+    b.ey.setVisible(on);
+    b.body.enable = on;
   }
 
   // He won: the castle stands again and the child wakes a few steps short of the bell.
-  leaveArena() {
-    const b = this.boss;
-    this.boss = null;
-    this.thrown = false;
-    b.setVisible(false);
-    b.eyes.setVisible(false);
-    b.body.enable = false;
-    this.bones.clear(true, true);
-    for (const i of this.pickups.getChildren().slice()) if (i.tool === 'revolver') i.destroy();
-    this.inventory.delete('revolver');
-    this.found.delete('revolver');
-    if (this.equipped === 'revolver') this.equipped = TOOLS.find((t) => this.inventory.has(t)) || null;
-    this.bell = this.belfryBell;
-    this.hills.setVisible(true);
-    this.grove.setVisible(true);
-    this.forestFar.setVisible(true);
-    this.forestMid.setVisible(true);
-    this.foreTrees.setVisible(true);
-    this.cameras.main.setBounds(0, 0, W * T, H * T);
-    this.checkpoint = { x: 137 * T, y: 9 * T };
-    audio.whistle(0.14, 76);
+  la() {
+    this.bs = null;
+    this.th = false;
+    this.sa(false);
+    this.bn.clear(true, true);
+    for (const i of [...this.pc.getChildren()]) if (i.tc === 'revolver') i.destroy();
+    this.iv.delete('revolver');
+    this.fn.delete('revolver');
+    if (this.eq === 'revolver') this.eq = TOOLS.find((t) => this.iv.has(t)) || null;
+    this.ba = this.bb;
+    this.ss(false);
+    this.ch = { x: 137 * T, y: 9 * T };
+    whistle(0.14, 76);
   }
 
   // Walks you down, then either lunges or scatters bones from his sack.
-  updateBoss(time) {
-    const b = this.boss;
-    if (!b || b.dying) return;
-    const p = this.player;
-    const dx = p.x - b.x;
-    const dir = Math.sign(dx) || 1;
+  ub(time) {
+    const b = this.bs;
+    if (!b || b.dy) return;
+    const dx = this.pl.x - b.x;
+    const dir = sign(dx) || 1;
     const rage = b.hp <= BOSS_HP / 2;
-    if (this.cut || this.dead) {
+    const walk = (ms) => {
+      b.md = 'walk';
+      b.na = time + ms;
+    };
+    if (this.cu || this.dd) {
       b.setVelocityX(0);
-    } else if (b.state === 'walk') {
-      b.setVelocityX(dir * (rage ? 78 : 52));
-      b.setFlipX(dir < 0);
-      if (time > b.nextAt) {
-        b.state = 'tell';
-        b.lunge = Math.abs(dx) < 150 && Math.random() < 0.6;
-        b.until = time + (rage ? 420 : 600);
+    } else if (b.md === 'walk') {
+      b.setVelocityX(dir * (rage ? 78 : 52)).setFlipX(dir < 0);
+      if (time > b.na) {
+        b.md = 'tell';
+        b.lu = abs(dx) < 150 && random() < 0.6;
+        b.un = time + (rage ? 420 : 600);
         b.setVelocityX(0);
-        audio.sweep('sine', 520, b.lunge ? 1040 : 780, 0.35, 0.09);
+        sweep(SINE, 520, b.lu ? 1040 : 780, 0.35, 0.09);
       }
-    } else if (b.state === 'tell') {
-      if (time > b.until) {
-        if (b.lunge) {
-          b.state = 'lunge';
-          b.until = time + 520;
-          b.setVelocityX(dir * 290);
-        } else {
-          for (let i = 0; i < (rage ? 4 : 3); i++) {
-            const bone = this.bones.create(b.x, b.y - 40, 'bone').setDepth(13).setScale(1.5);
-            bone.setVelocity((Phaser.Math.Clamp(dx, -300, 300) / 0.8) * (0.6 + i * 0.3), -280 - i * 25).setAngularVelocity(500);
-          }
-          audio.play('swing');
-          b.state = 'walk';
-          b.nextAt = time + (rage ? 1300 : 1900);
+    } else if (time > b.un) {
+      if (b.md !== 'tell') walk(rage ? 1100 : 1600);
+      else if (b.lu) {
+        b.md = 'lunge';
+        b.un = time + 520;
+        b.setVelocityX(dir * 290);
+      } else {
+        for (let i = 0; i < (rage ? 4 : 3); i++) {
+          this.bn
+            .create(b.x, b.y - 40, 'bone')
+            .setDepth(13)
+            .setScale(1.5)
+            .setVelocity((Phaser.Math.Clamp(dx, -300, 300) / 0.8) * (0.6 + i * 0.3), -280 - i * 25)
+            .setAngularVelocity(500);
         }
+        sound('swing');
+        walk(rage ? 1300 : 1900);
       }
-    } else if (time > b.until) {
-      b.state = 'walk';
-      b.nextAt = time + (rage ? 1100 : 1600);
     }
-    b.anims.timeScale = b.state === 'walk' ? (rage ? 2 : 1) : 0;
-    const tell = b.state === 'tell' && Math.floor(time / 60) % 2;
-    b.eyes.setPosition(b.x + (b.flipX ? -2 : 2), b.y - 42.5).setScale(tell ? 2 : 1);
+    b.anims.timeScale = b.md === 'walk' ? (rage ? 2 : 1) : 0;
+    b.ey.setPosition(b.x + (b.flipX ? -2 : 2), b.y - 42.5).setScale(b.md === 'tell' && floor(time / 60) % 2 ? 2 : 1);
   }
 
   // A campesino steps out of the rubble: everything stops while he speaks and throws the gun.
-  throwRevolver() {
-    this.thrown = true;
-    this.cut = true;
-    this.bones.clear(true, true);
-    const p = this.player;
-    const x0 = (ARENA_X + OX) * T;
+  tr() {
+    this.th = this.cu = true;
+    this.bn.clear(true, true);
+    const clamp = Phaser.Math.Clamp;
+    const x0 = ARENA_X * T;
     const gy = ARENA_Y * T;
-    const side = p.x > x0 + 320 ? -1 : 1;
-    const x = Phaser.Math.Clamp(p.x + side * 130, x0 + 30, x0 + 610);
-    const who = this.add.image(x, gy, 'campesino').setOrigin(0.5, 1).setScale(2).setDepth(9).setFlipX(side > 0).setAlpha(0);
-    const lamp = { x, y: gy - 30, r: 80, flicker: true };
-    this.lights.push(lamp);
-    const tx = Phaser.Math.Clamp(x, x0 + 170, x0 + 470);
-    const say = [
-      this.add.rectangle(tx, gy - 76, 328, 16, 0, 0.85).setDepth(61),
-      label(this, tx, gy - 76, 'EL SIEMPRE SE APARECE POR AQUI, MUCHACHO').setDepth(62),
-    ];
-    this.glitch.hit(0.5);
-    audio.play('checkpoint');
-    this.tweens.add({ targets: who, alpha: 1, duration: 300 });
+    const side = this.pl.x > x0 + 320 ? -1 : 1;
+    const x = clamp(this.pl.x + side * 130, x0 + 30, x0 + 610);
+    const tx = clamp(x, x0 + 170, x0 + 470);
+    const who = image(this, x, gy, 'campesino', 9, 0.5, 1).setScale(2).setFlipX(side > 0).setAlpha(0);
+    const lamp = this.al(x, gy - 30, 80, true, false);
+    const words = label(this, tx, gy - 76, 'EL SIEMPRE SE APARECE POR AQUI, MUCHACHO').setDepth(62);
+    const say = [this.add.rectangle(tx, gy - 76, 328, 16, 0, 0.85).setDepth(61), words];
+    this.gl.hi(0.5);
+    sound('checkpoint');
+    fade(this, who, 1, 300);
 
-    this.time.delayedCall(1700, () => {
-      say[1].setText('¡TOMA! ¡DISPARALE!');
-      audio.play('swing');
-      this.spawnPickup('revolver', x - side * 12, gy - 40, -side * 150, -300, null);
+    later(this, 1700, () => {
+      words.setText('¡TOMA! ¡DISPARALE!');
+      sound('swing');
+      this.sp('revolver', x - side * 12, gy - 40, -side * 150, -300);
     });
-    this.time.delayedCall(2700, () => {
-      this.cut = false;
-      this.invulnUntil = this.time.now + 2500;
-      this.message('¡Un revolver! Agarralo y dispara con BOTON 2.', 5000);
+    later(this, 2700, () => {
+      this.cu = false;
+      this.iu = this.time.now + 2500;
+      this.ms('¡Un revolver! Agarralo y dispara con BOTON 2.', 5000);
     });
-    this.tweens.add({
-      targets: [who, ...say],
-      alpha: 0,
-      delay: 5000,
-      duration: 1000,
-      onComplete: () => {
-        this.lights.splice(this.lights.indexOf(lamp), 1);
-        who.destroy();
-        say.forEach((o) => o.destroy());
-      },
+    fade(this, [who, ...say], 0, 1000, 5000, () => {
+      this.lh.splice(this.lh.indexOf(lamp), 1);
+      who.destroy();
+      say.forEach((o) => o.destroy());
     });
   }
 
-  hitBoss(dir) {
-    const b = this.boss;
+  hb(dir) {
+    const b = this.bs;
     b.hp--;
-    this.bleed(b.x, b.y - 30, 18, 2);
-    audio.play('flesh');
-    b.setTint(0xff4444);
-    this.time.delayedCall(120, () => b.clearTint());
-    if (b.state !== 'lunge') b.setVelocity(dir * 120, -90);
-    if (this.hud) this.hud.pulse();
+    this.bl(b.x, b.y - 30, 18);
+    sound('flesh');
+    this.fr(b);
+    if (b.md !== 'lunge') b.setVelocity(dir * 120, -90);
+    this.hd.ps();
     if (b.hp > 0) return;
 
-    b.dying = true;
+    b.dy = true;
     b.body.enable = false;
     b.anims.stop();
-    this.bones.clear(true, true);
-    this.bleed(b.x, b.y - 28, 90, 6);
-    audio.play('die');
-    [83, 79, 76, 72, 67, 60, 48].forEach((n, i) => audio.tone('sine', midi(n), audio.now + i * 0.22, 0.3, 0.1, 4000, 0.03, true, audio.sfx));
-    this.glitch.hit(1);
-    this.cameras.main.shake(500, 0.015);
-    this.tweens.add({ targets: [b, b.eyes], alpha: 0, duration: 1600 });
+    this.bn.clear(true, true);
+    this.bl(b.x, b.y - 28, 90, 6);
+    sound('die');
+    whistleNotes([83, 79, 76, 72, 67, 60, 48], 0, 0.22, 0.3, 0.1, 0.03);
+    this.jl(500, 0.015, 1);
+    fade(this, [b, b.ey], 0, 1600);
     this.tweens.add({ targets: b, scaleY: 0.1, duration: 1600 });
-    this.time.delayedCall(2400, () => this.win());
+    later(this, 2400, () => this.wi());
   }
 
-  win() {
-    this.won = true;
-    this.player.setVelocity(0, 0);
-    audio.play('greatbell');
-    this.glitch.hit(1);
-    this.cameras.main.shake(1200, 0.01);
-    this.tweens.add({ targets: this.bell, angle: { from: -14, to: 14 }, duration: 1100, yoyo: true, repeat: 2, ease: 'Sine.inOut' });
-    [0, 700, 1500, 2300].forEach((d) => this.time.delayedCall(d, () => this.storm.strike(1)));
+  wi() {
+    this.wn = true;
+    this.pl.setVelocity(0, 0);
+    sound('greatbell');
+    this.jl(1200, 0.01, 1);
+    this.tweens.add({ targets: this.ba, angle: { from: -14, to: 14 }, duration: 1100, yoyo: true, repeat: 2, ease: 'Sine.inOut' });
+    for (const d of [0, 700, 1500, 2300]) later(this, d, () => this.st.sr(1));
 
-    const { width, height } = this.scale;
-    const white = this.add.rectangle(0, 0, width, height, 0xffffff).setOrigin(0).setScrollFactor(0).setDepth(200).setAlpha(0);
-    this.tweens.add({ targets: white, alpha: 1, delay: 2600, duration: 2200 });
-    const lines = [
-      label(this, width / 2, height / 2 - 22, 'SUENA LA CAMPANA.', 0, 4),
-      label(this, width / 2, height / 2 + 18, 'LA LLUVIA TE OLVIDA... POR AHORA', 0x8a0010),
-    ];
-    lines.forEach((t, i) => {
-      t.setScrollFactor(0).setDepth(201).setAlpha(0);
-      this.tweens.add({ targets: t, alpha: 1, delay: 4800 + i * 1200, duration: 1200 });
-    });
-    this.time.delayedCall(11000, () => {
-      this.cameras.main.fadeOut(1500, 0, 0, 0);
-      this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('Title'));
+    fade(this, whiteout(this, 200), 1, 2200, 2600);
+    [
+      label(this, SCREEN_W / 2, SCREEN_H / 2 - 22, 'SUENA LA CAMPANA.', 0, 4),
+      label(this, SCREEN_W / 2, SCREEN_H / 2 + 18, 'LA LLUVIA TE OLVIDA... POR AHORA', 0x8a0010),
+    ].forEach((t, i) => fade(this, t.setScrollFactor(0).setDepth(201).setAlpha(0), 1, 1200, 4800 + i * 1200));
+    later(this, 11000, () => {
+      this.cm.fadeOut(1500, 0, 0, 0);
+      this.cm.once('camerafadeoutcomplete', () => this.scene.start('Title'));
     });
   }
 
   update(time, delta) {
-    const dt = Math.min(delta, 50) / 1000;
+    const dt = min(delta, 50) / 1000;
+    const cam = this.cm;
 
-    // On the flat approach the camera holds still vertically, so the woods do
-    // not lurch every time the child jumps; the cerro resumes the follow.
-    const flat = this.player.x < (OX + 34) * T;
-    if (flat !== this.flatCam) {
-      this.flatCam = flat;
-      this.cameras.main.setDeadzone(flat ? 1 : 0, flat ? 600 : 0);
+    this.ut(dt, time);
+    this.ul(dt, time);
+    // Dread: the picture breaks up as monsters close in, and a little when empty-handed.
+    let nearest = Infinity;
+    for (const m of this.mn()) {
+      if (m.dy) continue;
+      m.br = max(0, m.br - dt);
+      if (m.tl) this.us(m, dt, time);
+      else this.ua(m, dt, time);
+      nearest = min(nearest, Phaser.Math.Distance.Between(m.x, m.y, this.pl.x, this.pl.y));
     }
-
-    // The storm is muffled inside the cave and inside the church.
-    const indoors =
-      (this.player.x > (34 + OX) * T && this.player.x < (89 + OX) * T && this.player.y > CAVE_Y * T) ||
-      (this.player.x > (106 + OX) * T && this.player.y < CAVE_Y * T);
-    if (indoors !== this.indoors) {
-      this.indoors = indoors;
-      audio.setRainVolume(indoors ? 0.5 : 1);
-    }
-
-    this.updatePlayer(dt, time);
-    this.updateTools(dt, time);
-    for (const s of this.shades.getChildren().slice()) this.updateShade(s, dt, time);
-    for (const b of this.bats.getChildren().slice()) this.updateBat(b, dt, time);
-    this.updateBoss(time);
-    for (const v of this.veils) {
+    this.gl.bj = 0.04 + max(0, 1 - nearest / 140) * 0.14 + (this.eq ? 0 : 0.03);
+    this.ub(time);
+    for (const v of this.vl) {
       v.tilePositionY -= dt * 20;
-      v.tilePositionX = Math.sin(time / 300) * 3;
-      v.hurt = Math.max(0, (v.hurt || 0) - dt);
-      v.setAlpha(0.35 + 0.65 * v.strength * (v.hurt > 0 ? 0.6 + Math.random() * 0.4 : 1));
+      v.tilePositionX = sin(time / 300) * 3;
+      v.ht = max(0, (v.ht || 0) - dt);
+      v.setAlpha(0.35 + 0.65 * v.sn * (v.ht > 0 ? 0.6 + random() * 0.4 : 1));
     }
-    this.updatePickups(time);
-    this.updateRainSplashes();
-    this.storm.update(dt);
-    this.updateParallax();
-    this.updateDread();
-    this.glitch.tick(dt);
-    this.updateDarkness(time);
+    this.up(time);
+    this.ur();
+    this.st.update(dt);
+    // Parallax.
+    this.sf.tilePositionX = cam.scrollX * 0.1;
+    this.sf.y = 10 - cam.scrollY * 0.06;
+    this.bt.tilePositionX = cam.scrollX * 0.25;
+    this.bt.y = 21 - cam.scrollY * 0.15;
+    this.gl.tk(dt);
+    this.ud(time);
 
     // HUD text shivers with the glitch.
-    if (this.hud && this.hud.msg) {
-      const gi = this.glitch.intensity;
-      this.hud.msg.x = this.scale.width / 2 + (Math.random() < gi ? Phaser.Math.Between(-4, 4) : 0);
-      if (this.hud.bigText.alpha) this.hud.bigText.x = this.scale.width / 2 + Phaser.Math.Between(-6, 6) * gi;
+    if (this.hd.ma) {
+      const amount = this.gl.an;
+      this.hd.ma.x = SCREEN_W / 2 + (random() < amount ? between(-4, 4) : 0);
+      this.hd.bg.x = SCREEN_W / 2 + between(-6, 6) * amount;
     }
   }
 }
@@ -3590,99 +2718,74 @@ class HudScene extends Phaser.Scene {
   }
 
   create() {
-    this.game = this.scene.get('Game');
-    const { width, height } = this.scale;
-    this.heartIcons = [];
-    for (let i = 0; i < MAX_HEARTS; i++) {
-      this.heartIcons.push(this.add.image(14 + i * 18, 14, 'heart', 0).setScale(2));
-    }
-    this.slotGfx = this.add.graphics();
-    this.slotIcons = TOOLS.map((t, i) => this.add.image(width - 114 + i * 28, 16, `tool_${t}`));
-    this.slotUnknown = TOOLS.map((_, i) => label(this, width - 114 + i * 28, 16, '?', 0x8a8a8a));
-    this.bossHearts = [];
-    for (let i = 0; i < BOSS_HP; i++) this.bossHearts.push(this.add.image(width / 2 - 63 + i * 18, 14, 'heart', 0).setScale(2));
-    this.toolLabel = label(this, width - 12, 34, '').setOrigin(1, 0);
-    this.panel = this.add.container(0, 0, [
-      ...this.heartIcons,
-      this.slotGfx,
-      ...this.slotIcons,
-      ...this.slotUnknown,
-      ...this.bossHearts,
-      this.toolLabel,
-    ]);
-    this.msgBg = this.add.rectangle(0, height - 32, width, 20, 0, 0.8).setOrigin(0).setAlpha(0);
-    this.msg = label(this, width / 2, height - 22, '').setAlpha(0);
-    this.bigText = label(this, width / 2, height / 2, '', 0xff1a1a, 4).setAlpha(0);
-    this.hideAt = this.time.now + HUD_LINGER;
+    const hearts = (n, x) => Array.from({ length: n }, (_, i) => this.add.image(x + i * 18, 14, 'heart', 0).setScale(2));
+    const slotX = (i) => SCREEN_W - 114 + i * 28;
+    this.hc = hearts(MAX_HEARTS, 14);
+    this.bh = hearts(BOSS_HP, SCREEN_W / 2 - 63);
+    this.sy = this.add.graphics();
+    this.si = TOOLS.map((t, i) => this.add.image(slotX(i), 16, 'tool_' + t));
+    this.sl = TOOLS.map((_, i) => label(this, slotX(i), 16, '?', 0x8a8a8a));
+    this.tb = label(this, SCREEN_W - 12, 34, '').setOrigin(1, 0);
+    this.pn = this.add.container(0, 0, [...this.hc, this.sy, ...this.si, ...this.sl, ...this.bh, this.tb]);
+    this.mb = this.add.rectangle(0, SCREEN_H - 32, SCREEN_W, 20, 0, 0.8).setOrigin(0).setAlpha(0);
+    this.ma = label(this, SCREEN_W / 2, SCREEN_H - 22, '').setAlpha(0);
+    this.bg = label(this, SCREEN_W / 2, SCREEN_H / 2, '', 0xff1a1a, 4);
+    this.ps();
   }
 
-  pulse() {
-    this.hideAt = this.time.now + HUD_LINGER;
+  ps() {
+    this.ha = this.time.now + HUD_LINGER;
   }
 
-  showMessage(text, ms = 3500) {
-    const both = [this.msg.setText(text.toUpperCase()).setAlpha(1), this.msgBg.setAlpha(1)];
+  sq(text, ms = 3500) {
+    const both = [this.ma.setText(text.toUpperCase()).setAlpha(1), this.mb.setAlpha(1)];
     this.tweens.killTweensOf(both);
-    this.tweens.add({ targets: both, alpha: 0, delay: ms, duration: 600 });
+    fade(this, both, 0, 600, ms);
   }
 
-  big(text) {
-    this.bigText.setText(text).setAlpha(1);
-  }
-
-  clearBig() {
-    this.bigText.setAlpha(0);
+  bi(text) {
+    this.bg.setText(text);
   }
 
   update(time, delta) {
-    const g = this.game;
-    if (!g || !g.player) return;
+    const g = this.scene.get('Game');
+    if (!g.pl) return;
 
-    this.heartIcons.forEach((h, i) => h.setFrame(i < g.hearts ? 0 : 1));
-    const { width } = this.scale;
-    const gr = this.slotGfx.clear();
-    const dropped = new Set(g.pickups.getChildren().filter((i) => i.expires).map((i) => i.tool));
-    const b = g.boss && !g.boss.dying ? g.boss : null;
-    if (b) this.pulse();
-    this.bossHearts.forEach((h, i) => h.setVisible(!!b).setFrame(b && i < b.hp ? 0 : 1));
+    const gr = this.sy.clear();
+    const dropped = g.pc.getChildren().filter((i) => i.ex).map((i) => i.tc);
+    const b = g.bs && !g.bs.dy && g.bs;
+    if (b) this.ps();
+    this.hc.forEach((h, i) => h.setFrame(i < g.hr ? 0 : 1));
+    this.bh.forEach((h, i) => h.setVisible(!!b).setFrame(b && i < b.hp ? 0 : 1));
     TOOLS.forEach((t, i) => {
-      const x = width - 114 + i * 28;
-      const eq = g.equipped === t;
+      const x = SCREEN_W - 126 + i * 28;
+      const eq = g.eq === t;
+      const known = g.fn.has(t);
       // The revolver's slot stays hidden until it is thrown to you.
-      if (i > 2 && !g.found.has(t)) {
-        this.slotUnknown[i].setVisible(false);
-        this.slotIcons[i].setVisible(false);
-        return;
-      }
-      gr.fillStyle(0x0a0d12, 0.92).fillRect(x - 12, 4, 24, 24);
-      gr.lineStyle(eq ? 2 : 1, eq ? 0xff2a2a : 0xc8d0d8, 1).strokeRect(x - 12, 4, 24, 24);
-      const has = g.inventory.has(t);
-      const known = g.found.has(t);
-      this.slotUnknown[i].setVisible(!known);
-      this.slotIcons[i].setVisible(known);
-      this.slotIcons[i].setAlpha(has ? 1 : dropped.has(t) ? (Math.floor(g.time.now / 150) % 2 ? 0.3 : 0.65) : 0.3);
+      const shown = i < 3 || known;
+      this.sl[i].setVisible(shown && !known);
+      this.si[i].setVisible(known).setAlpha(g.iv.has(t) ? 1 : dropped.includes(t) && !(floor(time / 150) % 2) ? 0.65 : 0.3);
+      if (shown) gr.fillStyle(0x0a0d12, 0.92).fillRect(x, 4, 24, 24).lineStyle(eq ? 2 : 1, eq ? 0xff2a2a : 0xc8d0d8, 1).strokeRect(x, 4, 24, 24);
     });
-    this.toolLabel.setText(g.equipped ? TOOL_NAMES[g.equipped] : 'MANOS VACIAS');
-    this.toolLabel.setTint(g.equipped ? 0xffffff : 0xff3b3b);
+    this.tb.setText(g.eq ? TOOL_NAMES[g.eq] : 'MANOS VACIAS').setTint(g.eq ? 0xffffff : 0xff3b3b);
 
     // Fade the panel out once the linger window lapses.
-    const want = time < this.hideAt ? 1 : 0;
-    this.panel.alpha = Phaser.Math.Linear(this.panel.alpha, want, Math.min(1, delta / 160));
+    this.pn.alpha = Phaser.Math.Linear(this.pn.alpha, time < this.ha ? 1 : 0, min(1, delta / 160));
   }
 }
 
 new Phaser.Game({
   type: Phaser.WEBGL,
   parent: 'game-root',
-  width: 640,
-  height: 480,
+  width: SCREEN_W,
+  height: SCREEN_H,
   backgroundColor: '#000000',
   pixelArt: true,
   roundPixels: true,
   pipeline: { Glitch: GlitchPipeline },
   physics: {
     default: 'arcade',
-    arcade: { gravity: { x: 0, y: 900 }, debug: false },
+    arcade: { gravity: { x: 0, y: 900 } },
   },
   scale: {
     mode: Phaser.Scale.FIT,
