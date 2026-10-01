@@ -1,5 +1,5 @@
 {
   "game_name": "El Apagón",
-  "description": "Un metroidvania de terror: un chamo con impermeable amarillo sale de su cabaña y cruza el llano nublado en busca de su novia, en medio se encuentra con una gran odisea, y una historia que definitivamente nadie le creera.",
-  "player_mode": "single_player"
+  "description": "Un metroidvania de terror: un chamo con impermeable amarillo sale de su cabaña y cruza el llano nublado en busca de su novia, en medio se encuentra con una gran odisea, y una historia que definitivamente nadie le creera. Desbloquea el modo VERSUS al vencer a El Silbon y pelea contra la maquina o un segundo jugador.",
+  "player_mode": "two_player"
 }

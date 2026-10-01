@@ -1175,6 +1175,22 @@ async function saveScore(name = '') {
   } catch (err) {}
 }
 
+const STORY_KEY = 'el-apagon:story';
+async function storyUnlocked() {
+  if (!window.platanusArcadeStorage) return true;
+  try {
+    const r = await window.platanusArcadeStorage.get(STORY_KEY);
+    return !!(r.found && r.value);
+  } catch (err) {
+    return false;
+  }
+}
+async function unlockStory() {
+  try {
+    await window.platanusArcadeStorage.set(STORY_KEY, true);
+  } catch (err) {}
+}
+
 function buildWorld() {
   const grid = Array.from({ length: H }, () => new Array(W).fill(EMPTY));
   const interior = Array.from({ length: H }, () => new Array(W).fill(0));
@@ -1649,8 +1665,17 @@ class TitleScene extends Phaser.Scene {
     this.ts = image(this, mid + 3, 98, 'logo', 20).setScale(LOGO_SCALE).setTintFill(0xb00010);
     this.tt = image(this, mid, 96, 'logo', 21).setScale(LOGO_SCALE);
     controlsLegend(this);
-    this.pr = label(this, mid, 344, 'PULSA START', 0xffffff, 2).setDepth(21);
-    const best = label(this, mid, 370, '', 0x8c8c8c).setDepth(21);
+
+    this.sel = 0;
+    this.ul = false;
+    this.msg = null;
+    storyUnlocked().then((v) => (this.ul = v));
+    this.opts = [
+      label(this, mid, 344, 'COMENZAR', 0xffffff, 2).setDepth(22),
+      label(this, mid, 366, 'VERSUS', 0x8c8c8c, 2).setDepth(22),
+    ];
+    this.cur = label(this, mid - 84, 344, '>', 0xff1a1a, 2).setDepth(22);
+    const best = label(this, mid, 398, '', 0x8c8c8c).setDepth(21);
     loadTop().then(([t]) => t && best.active && best.setText(`MEJOR: ${t[3] || '???'} ${t[0]} - NOCHE ${t[1] + 1}`));
 
     const start = () => {
@@ -1666,9 +1691,32 @@ class TitleScene extends Phaser.Scene {
       cam.fadeOut(700, 0, 0, 0);
       cam.once('camerafadeoutcomplete', () => this.scene.start('Game'));
     };
-    anyPress = start;
+    this.go = start;
+    anyPress = null;
     this.events.once('shutdown', () => (anyPress = null));
-    this.input.once('pointerdown', start);
+    this.input.on('pointerdown', () => this.ok());
+  }
+
+  ok() {
+    if (this.sj) return;
+    if (!this.sel) {
+      clearTaps();
+      return this.go();
+    }
+    if (!this.ul) {
+      if (this.msg) return;
+      this.msg = label(this, SCREEN_W / 2, 316, 'DEBES TERMINAR LA HISTORIA PARA DESBLOQUEAR ESTE MODO', 0xaa3333).setDepth(22);
+      fade(this, this.msg, 0, 600, 2400, () => {
+        this.msg && this.msg.destroy();
+        this.msg = null;
+      });
+      return;
+    }
+    this.sj = true;
+    clearTaps();
+    sound('glitch');
+    this.gl.hi(1);
+    this.scene.start('Versus');
   }
 
   update(time, delta) {
@@ -1676,7 +1724,13 @@ class TitleScene extends Phaser.Scene {
     const mid = SCREEN_W / 2;
     this.st.update(dt);
     this.gl.tk(dt);
-    this.pr.setAlpha(floor(time / 500) % 2 ? 0.35 : 1);
+
+    if (tap('P1_U') || tap('P2_U') || tap('P1_D') || tap('P2_D')) this.sel ^= 1;
+    if (tap('P1_1') || tap('START1') || tap('START2')) this.ok();
+
+    const o = this.opts[this.sel];
+    this.cur.setPosition(o.x - o.width / 2 - 14, o.y).setAlpha(floor(time / 400) % 2 ? 0.3 : 1);
+    this.opts.forEach((t, i) => t.setTint(i === this.sel ? 0xffffff : 0x8c8c8c).setAlpha(i === this.sel ? 1 : 0.7));
 
     const jitter = random() < 0.06 + this.gl.an * 0.3 ? between(-6, 6) : 0;
     this.tt.x = mid + jitter;
@@ -1737,6 +1791,74 @@ const PROPS = {
   rose: [0, -7, 0],
   bell: [0, -1, 0],
 };
+
+const VROSTER = [
+  { k: 'child', n: 'EL CHAMO', tex: 'child', anim: 'child', bw: 10, bh: 20, ox: 3, oy: 4, sp: 130, jp: 360 },
+  { k: 'silbon', n: 'EL SILBON', tex: 'silbon', anim: 'silbon', bw: 10, bh: 42, ox: 7, oy: 14, sp: 118, jp: 340 },
+  { k: 'shade', n: 'EL ESPANTO', tex: 'shade', anim: 'shade', bw: 10, bh: 28, ox: 3, oy: 4, sp: 112, jp: 350 },
+  { k: 'campesino', n: 'EL CAMPESINO', tex: 'campesino', anim: null, bw: 10, bh: 22, ox: 3, oy: 4, sp: 120, jp: 340 },
+];
+const VANIM = { child: ['child-idle', 'child-run', 'child-jump'], silbon: ['silbon-walk', 'silbon-walk', 'silbon-walk'], shade: ['shade-walk', 'shade-walk', 'shade-walk'], campesino: null };
+
+function buildVersusArena(scene) {
+  const AW = 40;
+  const AH = 30;
+  const grid = Array.from({ length: AH }, () => new Array(AW).fill(EMPTY));
+  const fill = (x1, y1, x2, y2, v) => {
+    for (let y = y1; y <= y2; y++) for (let x = x1; x <= x2; x++) grid[y][x] = v;
+  };
+  fill(0, 28, AW - 1, 29, SOLID);
+  fill(0, 0, 0, AH - 1, SOLID);
+  fill(AW - 1, 0, AW - 1, AH - 1, SOLID);
+  fill(16, 23, 23, 23, BEAM);
+  fill(5, 20, 13, 20, BEAM);
+  fill(26, 20, 34, 20, BEAM);
+  fill(8, 16, 11, 16, BEAM);
+  fill(28, 16, 31, 16, BEAM);
+
+  const data = grid.map((row, y) => row.map((v, x) => (v === SOLID ? (y > 0 && grid[y - 1][x] !== SOLID ? TILE_STONE_TOP : TILE_STONE) : v === BEAM ? TILE_BEAM : -1)));
+  const map = scene.make.tilemap({ data, tileWidth: T, tileHeight: T });
+  const layer = map.createLayer(0, map.addTilesetImage('tiles', 'tiles', T, T, 0, 0), 0, 0).setDepth(0);
+  layer.setCollision([TILE_STONE, TILE_STONE_TOP]);
+  layer.forEachTile((t) => {
+    if (t.index === TILE_BEAM) t.setCollision(false, false, true, false);
+  });
+
+  backdrop(scene, 'hills', 0, -22);
+  backdrop(scene, 'grove', 0, -21);
+
+  const gy = 28 * T;
+  for (const [x, h, a] of [[70, 40, -8], [250, 70, 5], [400, 28, 12], [560, 56, -4]]) {
+    scene.add.tileSprite(x, gy + 4, 20, h, 'pillar').setOrigin(0.5, 1).setDepth(-8).setAngle(a);
+  }
+  image(scene, 320, gy, 'bell', -6, 0.5, 1);
+
+  return { W: AW, H: AH, layer, grid };
+}
+
+function versusAI(f, foe, dt, time, tool) {
+  const dx = foe.x - f.x, adx = abs(dx), dy = foe.y - f.y;
+  if (adx > 6 && dx) f.fc = sign(dx);
+  f.aiX = 0;
+  f.aiJ = false;
+  f.aiA = false;
+  const wd = tool && !f.tool ? hypot(tool.x - f.x, tool.y - f.y) : Infinity;
+  const toTool = wd < adx;
+  if (!f.aiT || time > f.aiT) {
+    f.aiT = time + 120 + random() * 100;
+    const tx = toTool ? tool.x - f.x : dx;
+    const ax = abs(tx);
+    if (ax > 60) f.av = sign(tx) || f.fc;
+    else if (ax < 26) f.av = random() < 0.45 ? -(sign(tx) || f.fc) : sign(tx) || f.fc;
+    else f.av = random() < 0.7 ? sign(tx) || f.fc : 0;
+    if (!toTool && adx < 34 && abs(dy) < 26 && time > f.ac && random() > 0.18) f.aiA = true;
+  }
+  f.aiX = f.av || 0;
+  if (f.onGround && f.body && time > (f.aj || 0) && (dy < -30 || f.body.blocked.left || f.body.blocked.right || (adx > 120 && random() < dt / 4000))) {
+    f.aiJ = true;
+    f.aj = time + 450 + random() * 450;
+  }
+}
 
 class GameScene extends Phaser.Scene {
   constructor() {
@@ -2892,6 +3014,7 @@ class GameScene extends Phaser.Scene {
 
     b.dy = true;
     b.body.enable = false;
+    unlockStory();
     earn(500);
     b.anims.stop();
     this.bn.clear(true, true);
@@ -3073,6 +3196,425 @@ class HudScene extends Phaser.Scene {
   }
 }
 
+const VSCALE = (k) => (k === 'silbon' ? 1.5 : 2);
+
+class VersusScene extends Phaser.Scene {
+  constructor() {
+    super('Versus');
+  }
+
+  create() {
+    const c = (this.c = this.cameras.main);
+    this.g = addCameraFx(c, 0.05);
+    this.r = new Storm(this, 3500, 8000);
+    this.r.ot = (p) => this.g.hi(0.4 * p);
+    this.A = buildVersusArena(this);
+    this.physics.world.setBounds(0, 0, SCREEN_W, SCREEN_H);
+    c.setBounds(0, 0, SCREEN_W, SCREEN_H);
+    c.fadeIn(600, 0, 0, 0);
+    this.T = this.physics.add.group();
+    this.physics.add.collider(this.T, this.A.layer);
+    this.B = this.add.particles(0, 0, 'blood', { emitting: false, lifespan: range(400, 900), speed: range(50, 220), angle: range(200, 340), gravityY: 700, scale: ramp(1, 0.4) }).setDepth(20);
+    this.L = [];
+    this.U = [];
+    this.H = null;
+    this.O = null;
+    this.n = 0;
+    initAudio();
+    startMusic();
+    this.m();
+    clearTaps();
+  }
+
+  u() {
+    this.U.forEach((o) => o.destroy());
+    this.U = [];
+  }
+
+  m() {
+    this.u();
+    this.M = 0;
+    this.I = 0;
+    this.U = [
+      label(this, 320, 140, 'VERSUS', 0xff1a1a, 4).setDepth(20),
+      label(this, 320, 230, '1 JUGADOR VS PC', 0xffffff, 2).setDepth(20),
+      label(this, 320, 270, '2 JUGADORES', 0x8c8c8c, 2).setDepth(20),
+      label(this, 320, 350, 'ARRIBA/ABAJO MOVER - BTN 1 ELEGIR', 0x8c8c8c).setDepth(20),
+    ];
+    this.l = [this.U[1], this.U[2]];
+  }
+
+  mu() {
+    if (tap('P1_U') || tap('P2_U') || tap('P1_D') || tap('P2_D')) {
+      this.I ^= 1;
+      sound('poke');
+    }
+    if (tap('P1_1') || tap('START1')) {
+      this.P = !this.I;
+      clearTaps();
+      sound('newtool');
+      return this.cs();
+    }
+    this.l.forEach((t, i) => t.setTint(i === this.I ? 0xffffff : 0x8c8c8c));
+  }
+
+  cs() {
+    this.cf();
+    this.u();
+    this.M = 1;
+    this.S = [{ i: 0, l: false }, { i: 1, l: false }];
+    if (this.P) {
+      this.S[1].i = between(0, 3);
+      this.S[1].l = true;
+    }
+    this.G = VROSTER.map((r, i) => {
+      const x = 320 + ((i % 2) - 0.5) * 122;
+      const y = 216 + (floor(i / 2) - 0.5) * 98;
+      return { x, y, s: image(this, x, y - 10, r.tex, 5, 0.5, 1, 0).setScale(VSCALE(r.k)), n: label(this, x, y + 40, r.n, 0xc8c8c8) };
+    });
+    const pn = (x, y, w, h) => this.add.rectangle(x, y, w, h, 0x0e1320, 0.82).setStrokeStyle(1, 0x2b3648).setDepth(1);
+    this.ma = this.add.rectangle(0, 0, 86, 86, 0, 0).setStrokeStyle(2, 0xff2a2a).setDepth(6);
+    this.mb = this.add.rectangle(0, 0, 86, 86, 0, 0).setStrokeStyle(2, 0xffffff).setDepth(6);
+    this.ga = image(this, 92, 258, VROSTER[this.S[0].i].tex, 5, 0.5, 1, 0).setScale(VSCALE(VROSTER[this.S[0].i].k) * 1.5);
+    this.gb = image(this, SCREEN_W - 92, 258, VROSTER[this.S[1].i].tex, 5, 0.5, 1, 0).setScale(VSCALE(VROSTER[this.S[1].i].k) * 1.5);
+    this.U = [
+      pn(320, 216, 300, 250),
+      pn(92, 255, 150, 240),
+      pn(SCREEN_W - 92, 255, 150, 240),
+      ...this.G.flatMap((g) => [g.s, g.n]),
+      this.ma,
+      this.mb,
+      this.ga,
+      this.gb,
+      label(this, 92, 342, 'JUGADOR 1', 0xff2a2a),
+      label(this, SCREEN_W - 92, 342, this.P ? 'PC' : 'JUGADOR 2', 0xffffff),
+      label(this, 320, 368, 'MUEVE Y BTN 1 PARA ELEGIR', 0x8c8c8c),
+    ];
+  }
+
+  nv(s, dx, dy) {
+    const i = s.i;
+    const j = max(0, min(1, floor(i / 2) + dy)) * 2 + max(0, min(1, (i % 2) + dx));
+    if (j !== i) {
+      s.i = j;
+      sound('poke');
+    }
+  }
+
+  cu() {
+    const a = this.S[0];
+    const b = this.S[1];
+    if (!a.l) {
+      if (tap('P1_L')) this.nv(a, -1, 0);
+      if (tap('P1_R')) this.nv(a, 1, 0);
+      if (tap('P1_U')) this.nv(a, 0, -1);
+      if (tap('P1_D')) this.nv(a, 0, 1);
+      if (tap('P1_1') || tap('START1')) {
+        a.l = true;
+        sound('checkpoint');
+      }
+    }
+    if (!this.P && !b.l) {
+      if (tap('P2_L')) this.nv(b, -1, 0);
+      if (tap('P2_R')) this.nv(b, 1, 0);
+      if (tap('P2_U')) this.nv(b, 0, -1);
+      if (tap('P2_D')) this.nv(b, 0, 1);
+      if (tap('P2_1') || tap('START2')) {
+        b.l = true;
+        sound('checkpoint');
+      }
+    }
+    this.ma.setPosition(this.G[a.i].x, this.G[a.i].y - 10).setAlpha(a.l ? 1 : 0.55);
+    this.mb.setPosition(this.G[b.i].x, this.G[b.i].y - 10).setAlpha(b.l ? 1 : 0.55);
+    this.ga.setTexture(VROSTER[a.i].tex).setScale(VSCALE(VROSTER[a.i].k) * 1.5);
+    this.gb.setTexture(VROSTER[b.i].tex).setScale(VSCALE(VROSTER[b.i].k) * 1.5);
+    if (a.l && b.l) {
+      this.C = [a.i, b.i];
+      clearTaps();
+      this.sf();
+    }
+  }
+
+  mk(s, ci, x) {
+    const r = VROSTER[ci];
+    const f = this.physics.add.sprite(x, 27 * T, r.tex, 0);
+    f.setOrigin(0.5, 1).setDepth(10).setCollideWorldBounds(true);
+    f.body.setSize(r.bw, r.bh).setOffset(r.ox, r.oy).setMaxVelocityY(620);
+    f.cfg = r;
+    f.side = s;
+    f.hp = 3;
+    f.fc = s === 1 ? 1 : -1;
+    f.human = s === 1 || !this.P;
+    f.aiX = 0;
+    f.aiJ = false;
+    f.aiA = false;
+    f.av = f.fc;
+    f.aiT = 0;
+    f.aj = 0;
+    f.ac = 0;
+    f.stun = 0;
+    f.iu = 0;
+    f.jc = 0;
+    f.tool = null;
+    f.onGround = false;
+    this.L.push(this.physics.add.collider(f, this.A.layer));
+    this.L.push(this.physics.add.overlap(f, this.T, (_, it) => this.pk(f, it)));
+    return f;
+  }
+
+  cf() {
+    this.L.forEach((c) => c.destroy());
+    this.L = [];
+    for (const f of [this.a, this.b]) if (f) f.destroy();
+    this.a = this.b = null;
+    [...this.T.getChildren()].forEach((it) => it.destroy());
+    if (this.H) {
+      this.H.forEach((o) => o.destroy());
+      this.H = null;
+    }
+    if (this.wa) {
+      this.wa.destroy();
+      this.wb.destroy();
+      this.wa = this.wb = null;
+    }
+  }
+
+  sf() {
+    this.cf();
+    this.u();
+    this.M = 2;
+    this.O = null;
+    this.a = this.mk(1, this.C[0], 90);
+    this.b = this.mk(2, this.C[1], SCREEN_W - 90);
+    this.H = [];
+    for (let i = 0; i < 3; i++) {
+      this.H.push(image(this, 16 + i * 18, 16, 'heart', 40).setScale(2));
+      this.H.push(image(this, SCREEN_W - 16 - i * 18, 16, 'heart', 40).setScale(2));
+    }
+    this.wa = label(this, 12, 32, '', 0xffffff).setOrigin(0, 0).setDepth(40);
+    this.wb = label(this, SCREEN_W - 12, 32, '', 0xffffff).setOrigin(1, 0).setDepth(40);
+    this.hd();
+    this.n = this.time.now + 2000;
+    clearTaps();
+  }
+
+  st(tc, x, y, vx, vy) {
+    const p = this.T.create(x, y, 'tool_' + tc).setDepth(14).setBounce(0.3).setScale(1.7).setVelocity(vx || 0, vy || 0);
+    p.body.setSize(16, 16);
+    p.tc = tc;
+    p.gw = image(this, x, y, 'light', 45).setBlendMode(1).setScale(0.8).setAlpha(0.22).setTint(0xffe066);
+    p.once('destroy', () => p.gw && p.gw.destroy());
+  }
+
+  sp(t) {
+    if (this.O || this.T.getLength() >= 3 || t < this.n) return;
+    this.n = t + between(4000, 8000);
+    this.st(TOOLS[between(0, 3)], between(40, SCREEN_W - 40), -12, 0, 0);
+  }
+
+  nt(f) {
+    let b = null;
+    let d = Infinity;
+    for (const it of this.T.getChildren()) {
+      const q = hypot(it.x - f.x, it.y - f.y);
+      if (q < d) {
+        d = q;
+        b = it;
+      }
+    }
+    return b;
+  }
+
+  pk(f, it) {
+    if (!it.active || this.O) return;
+    f.tool = it.tc;
+    sound('pickup');
+    it.destroy();
+    this.hd();
+  }
+
+  dr(f, dir) {
+    const t = f.tool;
+    f.tool = null;
+    this.st(t, f.x, f.y - 16, -dir * between(40, 90), -200);
+    this.hd();
+  }
+
+  bl(x, y, n) {
+    this.B.emitParticleAt(x, y, n);
+  }
+
+  at(f, foe, t) {
+    const w = f.tool;
+    const dir = f.fc;
+    f.ac = t + (w === 'revolver' ? 520 : w === 'crowbar' ? 420 : 360);
+    if (w === 'revolver') {
+      sound('shot');
+      this.c.shake(60, 0.005);
+      this.g.hi(0.2);
+      const x0 = f.x + dir * 14;
+      const y0 = f.y - 12;
+      const ln = new Phaser.Geom.Line(x0, y0, x0 + dir * 300, y0);
+      const tr = this.add.graphics().setDepth(30).lineStyle(1, 0xffffff, 0.9).strokeLineShape(ln);
+      later(this, 50, () => tr.destroy());
+      if (foe && !this.O && Phaser.Geom.Intersects.LineToRectangle(ln, foe.getBounds())) this.hi(f, foe, dir);
+      return;
+    }
+    sound(w === 'crowbar' ? 'swing' : 'poke');
+    const r = w === 'crowbar' ? 40 : w === 'umbrella' ? 36 : 30;
+    const box = new Phaser.Geom.Rectangle(dir > 0 ? f.x + 4 : f.x - 4 - r, f.y - 24, r, 24);
+    const sw = this.add.rectangle(box.centerX, box.centerY, r, 4, 0xffffff, 0.55).setDepth(30).setRotation(dir > 0 ? 0.25 : -0.25);
+    later(this, 90, () => sw.destroy());
+    if (foe && !this.O && Phaser.Geom.Intersects.RectangleToRectangle(box, foe.getBounds())) this.hi(f, foe, dir);
+  }
+
+  hi(a, v, dir) {
+    const t = this.time.now;
+    if (this.O || t < v.iu) return;
+    v.iu = t + 1200;
+    v.stun = t + 320;
+    v.setVelocity((dir || a.fc) * 190, -220);
+    this.bl(v.x, v.y - 14, 14);
+    sound('hurt');
+    this.c.shake(140, 0.012);
+    this.g.hi(0.5);
+    if (v.tool) this.dr(v, dir || a.fc);
+    if (--v.hp <= 0) this.ko(v, a);
+    else this.hd();
+  }
+
+  lo(f, foe) {
+    if (this.O) return;
+    f.hp--;
+    sound('hurt');
+    this.c.shake(140, 0.012);
+    this.g.hi(0.5);
+    if (f.hp <= 0) this.ko(f, foe);
+    else {
+      f.setPosition(f.side === 1 ? 90 : SCREEN_W - 90, 24 * T).setVelocity(0, 0);
+      f.iu = this.time.now + 1200;
+      this.hd();
+    }
+  }
+
+  ko(v, a) {
+    if (v.dy) return;
+    v.dy = true;
+    v.body.enable = false;
+    this.bl(v.x, v.y - 14, 40);
+    sound('die');
+    this.c.shake(300, 0.02);
+    this.g.hi(1);
+    fade(this, [v], 0, 700);
+    this.wn(a);
+  }
+
+  uf(f, foe, dt, t) {
+    const b = f.body;
+    const g = b.blocked.down;
+    f.onGround = g;
+    if (f.y > SCREEN_H + 30) return this.lo(f, foe);
+    if (this.O) return f.setVelocityX(0);
+    let ix = 0;
+    let ij = false;
+    let ia = false;
+    if (f.human) {
+      const p = f.side === 1;
+      ix = (down(p ? 'P1_R' : 'P2_R') ? 1 : 0) - (down(p ? 'P1_L' : 'P2_L') ? 1 : 0);
+      ij = tap(p ? 'P1_2' : 'P2_2');
+      ia = tap(p ? 'P1_1' : 'P2_1');
+    } else {
+      versusAI(f, foe, dt, t, this.nt(f));
+      ix = f.aiX;
+      ij = f.aiJ;
+      ia = f.aiA;
+    }
+    if (t >= f.stun) {
+      if (ix) {
+        f.setVelocityX(ix * f.cfg.sp);
+        f.fc = ix;
+      } else f.setVelocityX(0);
+      if (ij && g && t > f.jc) {
+        f.setVelocityY(-f.cfg.jp);
+        f.jc = t + 260;
+        sound('jump');
+      }
+    }
+    if (ia && t > f.ac && t > f.stun) this.at(f, foe, t);
+    const A = VANIM[f.cfg.k];
+    const run = g && abs(b.velocity.x) > 5;
+    if (A) {
+      if (!g) f.play(A[2], true);
+      else if (run) f.play(A[1], true);
+      else {
+        f.anims.stop();
+        f.setFrame(0);
+      }
+    }
+    f.setFlipX(f.fc < 0);
+    f.setAlpha(t < f.iu && floor(t / 70) % 2 ? 0.35 : 1);
+  }
+
+  vf(t, dt) {
+    this.sp(t);
+    this.uf(this.a, this.b, dt, t);
+    this.uf(this.b, this.a, dt, t);
+    for (const it of this.T.getChildren()) if (it.gw) it.gw.setPosition(it.x, it.y).setScale(0.78 + 0.05 * sin(t / 240 + it.y * 0.11));
+    this.hd();
+  }
+
+  hd() {
+    if (!this.H || !this.a) return;
+    for (let i = 0; i < 3; i++) {
+      this.H[i * 2].setFrame(i < this.a.hp ? 0 : 1);
+      this.H[i * 2 + 1].setFrame(i < this.b.hp ? 0 : 1);
+    }
+    this.wa.setText(this.a.tool ? TOOL_NAMES[this.a.tool] : 'MANOS VACIAS');
+    this.wb.setText(this.b.tool ? TOOL_NAMES[this.b.tool] : 'MANOS VACIAS');
+  }
+
+  wn(a) {
+    this.O = a;
+    this.M = 3;
+    this.I = 0;
+    const w = a === this.a;
+    const who = w ? 'JUGADOR 1' : this.P ? 'LA PC' : 'JUGADOR 2';
+    this.u();
+    this.U = [
+      label(this, 320, 170, '¡GANO ' + who + '!', 0xff1a1a, 3).setDepth(20),
+      label(this, 320, 210, VROSTER[w ? this.C[0] : this.C[1]].n, 0xffffff, 2).setDepth(20),
+      label(this, 320, 290, 'REVANCHA', 0xffffff, 2).setDepth(20),
+      label(this, 320, 330, 'ELEGIR PERSONAJES', 0x8c8c8c, 2).setDepth(20),
+      label(this, 320, 400, 'ARRIBA/ABAJO MOVER - BTN 1 ELEGIR', 0x8c8c8c).setDepth(20),
+    ];
+    this.l = [this.U[2], this.U[3]];
+  }
+
+  vr() {
+    if (tap('P1_U') || tap('P2_U') || tap('P1_D') || tap('P2_D')) {
+      this.I ^= 1;
+      sound('poke');
+    }
+    if (tap('P1_1') || tap('START1')) {
+      clearTaps();
+      if (this.I) this.cs();
+      else this.sf();
+      return;
+    }
+    this.l.forEach((t, i) => t.setTint(i === this.I ? 0xffffff : 0x8c8c8c));
+  }
+
+  update(t, dt) {
+    const d = min(dt, 50) / 1000;
+    this.r.update(d);
+    this.g.tk(d);
+    if (this.M === 0) this.mu();
+    else if (this.M === 1) this.cu();
+    else if (this.M === 2) this.vf(t, d);
+    else this.vr();
+  }
+}
+
 new Phaser.Game({
   type: Phaser.WEBGL,
   parent: 'game-root',
@@ -3090,6 +3632,6 @@ new Phaser.Game({
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
-  scene: [BootScene, TitleScene, GameScene, HudScene, PauseScene],
+  scene: [BootScene, TitleScene, GameScene, HudScene, PauseScene, VersusScene],
 });
 })();
