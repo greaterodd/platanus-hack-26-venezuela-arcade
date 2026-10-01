@@ -3290,19 +3290,27 @@ class VersusScene extends Phaser.Scene {
     ];
   }
 
+  n2(i, dx, dy) {
+    return max(0, min(1, floor(i / 2) + dy)) * 2 + max(0, min(1, (i % 2) + dx));
+  }
+
   cu() {
     if (tap('P1_5')) return this.m();
     if (!this.al) {
-      if (tap('P1_R')) this.a = (this.a + 1) % 4;
-      if (tap('P1_L')) this.a = (this.a + 3) % 4;
+      if (tap('P1_L')) this.a = this.n2(this.a, -1, 0);
+      if (tap('P1_R')) this.a = this.n2(this.a, 1, 0);
+      if (tap('P1_U')) this.a = this.n2(this.a, 0, -1);
+      if (tap('P1_D')) this.a = this.n2(this.a, 0, 1);
       if (tap('P1_1') || tap('START1')) {
         this.al = true;
         sound('checkpoint');
       }
     }
     if (!this.P && !this.bl) {
-      if (tap('P2_R')) this.b = (this.b + 1) % 4;
-      if (tap('P2_L')) this.b = (this.b + 3) % 4;
+      if (tap('P2_L')) this.b = this.n2(this.b, -1, 0);
+      if (tap('P2_R')) this.b = this.n2(this.b, 1, 0);
+      if (tap('P2_U')) this.b = this.n2(this.b, 0, -1);
+      if (tap('P2_D')) this.b = this.n2(this.b, 0, 1);
       if (tap('P2_1') || tap('START2')) {
         this.bl = true;
         sound('checkpoint');
@@ -3339,10 +3347,13 @@ class VersusScene extends Phaser.Scene {
     f.su = 0;
     f.iu = 0;
     f.jc = 0;
+    f.jp = NEVER;
+    f.lg = NEVER;
     f.tool = null;
     f.iv = [];
     f.onGround = false;
     f.hl = image(this, x, 27 * T, 'tool_flashlight', 11).setVisible(false);
+    f.co = image(this, x, 27 * T, 'cone', 45, 0, 0.5).setBlendMode(1).setVisible(false);
     if (r.k === 'silbon' || r.k === 'shade') f.ey = image(this, x, 27 * T, 'eyes', 60);
     this.L.push(this.physics.add.collider(f, this.A.layer));
     this.L.push(this.physics.add.overlap(f, this.T, (_, it) => this.pk(f, it)));
@@ -3355,6 +3366,7 @@ class VersusScene extends Phaser.Scene {
     for (const f of [this.p1, this.p2])
       if (f) {
         if (f.hl) f.hl.destroy();
+        if (f.co) f.co.destroy();
         if (f.ey) f.ey.destroy();
         f.destroy();
       }
@@ -3419,6 +3431,19 @@ class VersusScene extends Phaser.Scene {
     this.st(t, f.x, f.y - 16, -dir * between(40, 90), -200);
   }
 
+  lt(f, foe, t) {
+    const dir = f.fc;
+    f.co.setVisible(true).setPosition(f.x + dir * 10, f.y - 12).setRotation(dir > 0 ? 0 : PI);
+    if (foe && !this.O && foe.cfg.k === 'shade' && t > f.ac) {
+      const dx = foe.x - f.x;
+      const dy = (foe.y - 12) - (f.y - 12);
+      if (hypot(dx, dy) < 190 && abs(Phaser.Math.Angle.Wrap(atan2(dy, dx) - (dir > 0 ? 0 : PI))) < 0.42) {
+        f.ac = t + 700;
+        this.hi(f, foe, dir);
+      }
+    }
+  }
+
   at(f, foe, t) {
     const w = f.tool;
     const dir = f.fc;
@@ -3428,12 +3453,17 @@ class VersusScene extends Phaser.Scene {
       this.c.shake(60, 0.005);
       const x0 = f.x + dir * 14;
       const y0 = f.y - 12;
-      if (foe && !this.O && Phaser.Geom.Intersects.LineToRectangle(new Phaser.Geom.Line(x0, y0, x0 + dir * 300, y0), foe.getBounds())) this.hi(f, foe, dir);
+      const ln = new Phaser.Geom.Line(x0, y0, x0 + dir * 300, y0);
+      const tr = this.add.graphics().setDepth(30).lineStyle(1, 0xffffff, 0.9).strokeLineShape(ln);
+      later(this, 50, () => tr.destroy());
+      if (foe && !this.O && Phaser.Geom.Intersects.LineToRectangle(ln, foe.getBounds())) this.hi(f, foe, dir);
       return;
     }
     sound(w === 'crowbar' ? 'swing' : 'poke');
     const r = w === 'crowbar' ? 40 : w === 'umbrella' ? 36 : 30;
     const box = new Phaser.Geom.Rectangle(dir > 0 ? f.x + 4 : f.x - 4 - r, f.y - 24, r, 24);
+    const sw = this.add.rectangle(box.centerX, box.centerY, r, 4, 0xffffff, 0.55).setDepth(30).setRotation(dir > 0 ? 0.25 : -0.25);
+    later(this, 160, () => sw.destroy());
     if (foe && !this.O && Phaser.Geom.Intersects.RectangleToRectangle(box, foe.getBounds())) this.hi(f, foe, dir);
   }
 
@@ -3463,16 +3493,22 @@ class VersusScene extends Phaser.Scene {
   uf(f, foe, dt, t) {
     const b = f.body;
     const g = b.blocked.down;
+    if (g) f.lg = t;
     f.onGround = g;
+    f.co.setVisible(false);
     if (this.O) return f.setVelocityX(0);
     let ix = 0;
     let ij = false;
     let ia = false;
+    let jump = null;
+    let use = null;
     if (f.human) {
       const p = f.side === 1;
+      jump = p ? 'P1_2' : 'P2_2';
+      use = p ? 'P1_1' : 'P2_1';
       ix = (down(p ? 'P1_R' : 'P2_R') ? 1 : 0) - (down(p ? 'P1_L' : 'P2_L') ? 1 : 0);
-      ij = tap(p ? 'P1_2' : 'P2_2');
-      ia = tap(p ? 'P1_1' : 'P2_1');
+      ij = tap(jump);
+      ia = tap(use);
       if (tap(p ? 'P1_3' : 'P2_3') && t > f.su + 400) {
         f.su = t + 160;
         f.stun = t + 160;
@@ -3486,18 +3522,23 @@ class VersusScene extends Phaser.Scene {
       ij = f.aiJ;
       ia = f.aiA;
     }
+    if (ij) f.jp = t;
     if (t >= f.stun) {
       if (ix) {
         f.setVelocityX(ix * f.cfg.sp);
         f.fc = ix;
       } else f.setVelocityX(0);
-      if (ij && g && t > f.jc) {
+      if (t - f.jp < 120 && t - f.lg < 110) {
         f.setVelocityY(-f.cfg.jp);
-        f.jc = t + 260;
+        f.jp = f.lg = NEVER;
         sound('jump');
       }
     }
-    if (ia && t > f.ac && t > f.stun) this.at(f, foe, t);
+    if (jump && untap(jump) && b.velocity.y < 0) f.setVelocityY(b.velocity.y * 0.45);
+    if (f.tool === 'umbrella' && jump && !g && down(jump) && b.velocity.y > 0) f.setVelocityY(min(b.velocity.y, 36));
+    if (f.tool === 'flashlight') {
+      if (f.human ? down(use) : ia) this.lt(f, foe, t);
+    } else if (ia && t > f.ac && t > f.stun) this.at(f, foe, t);
     const A = VANIM[f.cfg.k];
     const run = g && abs(b.velocity.x) > 5;
     if (A) {
@@ -3534,9 +3575,15 @@ class VersusScene extends Phaser.Scene {
     this.O = a;
     this.M = 3;
     this.I = 0;
-    const who = a === this.p1 ? 'JUGADOR 1' : this.P ? 'LA PC' : 'JUGADOR 2';
+    const who = a ? (a === this.p1 ? 'JUGADOR 1' : this.P ? 'LA PC' : 'JUGADOR 2') : null;
     this.u();
-    this.U = [this.add.rectangle(320, 290, 440, 250, 0x0e1320, 0.82).setStrokeStyle(1, 0x2b3648).setDepth(1), label(this, 320, 180, '¡GANO ' + who + '!', 0xff1a1a, 3).setDepth(20), label(this, 320, 290, 'REVANCHA', 0xffffff, 2).setDepth(20), label(this, 320, 330, 'ELEGIR PERSONAJES', 0x8c8c8c, 2).setDepth(20), label(this, 320, 370, 'VOLVER AL INICIO', 0x8c8c8c, 2).setDepth(20)];
+    this.U = [
+      this.add.rectangle(320, 290, 440, 240, 0x0e1320, 0.82).setStrokeStyle(1, 0x2b3648).setDepth(1),
+      label(this, 320, 205, a ? '¡GANO ' + who + '!' : 'PAUSA', a ? 0xff1a1a : 0xffffff, 3).setDepth(20),
+      label(this, 320, 285, 'REVANCHA', 0xffffff, 2).setDepth(20),
+      label(this, 320, 325, 'ELEGIR PERSONAJES', 0x8c8c8c, 2).setDepth(20),
+      label(this, 320, 365, 'VOLVER AL INICIO', 0x8c8c8c, 2).setDepth(20),
+    ];
     this.l = [this.U[2], this.U[3], this.U[4]];
   }
 
@@ -3561,9 +3608,14 @@ class VersusScene extends Phaser.Scene {
 
   update(t, dt) {
     const d = min(dt, 50) / 1000;
-    if (this.M === 0) this.mu();
+    if (this.M === 2) {
+      if (tap('START1') || tap('START2')) {
+        clearTaps();
+        return this.wn(null);
+      }
+      this.vf(t, d);
+    } else if (this.M === 0) this.mu();
     else if (this.M === 1) this.cu();
-    else if (this.M === 2) this.vf(t, d);
     else this.vr();
   }
 }
