@@ -102,7 +102,7 @@ const SINE = 2;
 const TRIANGLE = 3;
 
 // ac: the context. master/music/sfx/amb: mix buses. white/brown: 3s noise buffers.
-let ac, master, music, sfx, amb, white, brown, musicStep, musicAt, musicTimer;
+let ac, master, music, sfx, amb, white, brown, musicStep, musicAt, musicTimer, rainGain;
 
 const now = () => ac.currentTime;
 const chain = (...nodes) => nodes.reduce((a, b) => (a.connect(b), b));
@@ -165,13 +165,24 @@ function initAudio() {
     b[i] = last * 3.5;
   }
 
-  // Rain: a hiss plus a low rumble, looping for good.
+  // Rain: a hiss plus a low rumble, looping for good. Kept low so it reads as
+  // background ambience rather than a foreground layer.
   const hiss = noise(white, true);
-  chain(hiss, filter('high', 900), filter('low', 7000), gain(0.16), amb);
+  const hg = gain(0.06);
+  chain(hiss, filter('high', 900), filter('low', 7000), hg, amb);
   hiss.start();
   const body = noise(brown, true);
-  chain(body, gain(0.22), amb);
+  const bg = gain(0.08);
+  chain(body, bg, amb);
   body.start();
+  rainGain = [hg, bg];
+}
+
+// The storm is muffled underground and inside the church.
+function setRainVolume(scale) {
+  if (!rainGain) return;
+  rainGain[0].gain.value = 0.06 * scale;
+  rainGain[1].gain.value = 0.08 * scale;
 }
 
 function thunder(delay = 0.6, power = 1) {
@@ -183,8 +194,8 @@ function thunder(delay = 0.6, power = 1) {
   const lp = filter('low');
   slide(lp.frequency, 900, t, 90, t + 3.5);
   const g = gain();
-  slide(g.gain, 0.0001, t, 1.6 * power, t + 0.08);
-  slide(g.gain, 1.2 * power, t + 0.5, 0.0001, t + 4.2);
+  slide(g.gain, 0.0001, t, 2.2 * power, t + 0.08);
+  slide(g.gain, 1.7 * power, t + 0.5, 0.0001, t + 4.2);
   chain(src, lp, g, amb);
   run(src, t, t + 4.5);
 
@@ -193,7 +204,7 @@ function thunder(delay = 0.6, power = 1) {
     const c = noise(white);
     const hp = filter('high', 1500);
     const cg = gain();
-    slide(cg.gain, 0.5 * power, t, 0.0001, t + 0.35);
+    slide(cg.gain, 0.75 * power, t, 0.0001, t + 0.35);
     chain(c, hp, cg, amb);
     run(c, t, t + 0.4);
   }
@@ -387,7 +398,6 @@ const PAL = {};
 for (const e of 'o0c k00 10e 223 338 45a 58c 6c4 sc9 wff a05 b0a d0b f10 i16 j18 l1a m1c n1e p22 q26 t2a u2e v33 x3a z4a A55 B6a C77 D8a E9a Fb0 Gd0 Hd8 Ie6 Yf2c230 ya8780f hffe07a rff1a1a R7a0008 cc00010 Jd9a520 K8a6410 L8a5a36 M2a1a10 Ne8c21a O8a7410 P6a0008 Q3a0004 S8a0010 Tb0000e U5a0008'.split(' ')) {
   PAL[e[0]] = '#' + e.slice(1).padEnd(6, e.slice(1));
 }
-const grey = (v) => '#' + v.toString(16).padStart(2, '0').repeat(3);
 
 let textures; // the texture manager, set by makeArt
 let pen; // 2D context of the texture being drawn
@@ -669,11 +679,16 @@ RrrrrrR
 ];
 
 // Tile frames in the 'tiles' strip.
-const TILE_BRICK = 0;
-const TILE_BRICK_TOP = 1;
+const TILE_DIRT = 0;
+const TILE_DIRT_TOP = 1;
 const TILE_BEAM = 2;
 const TILE_BG = 3;
-const TILE_BG_ALT = 4;
+const TILE_CAVE = 4;
+const TILE_ROCK = 5;
+const TILE_ROCK_TOP = 6;
+const TILE_STONE = 7;
+const TILE_STONE_TOP = 8;
+const TILE_BLACK = 9;
 
 // Textures that are nothing but filled rects: key -> [width, height, rects].
 const RECT_ART = {
@@ -736,39 +751,57 @@ function makeArt(scene) {
   makeFx();
 }
 
-// One 16px tile of brickwork at `ox`; `base` and `mortar` are grey levels.
-function brick(ox, rand, base, mortar, top) {
-  box(grey(mortar), ox, 0, 16, 16);
-  [0, 5, 10].forEach((y, i) => {
-    for (let x = i % 2 ? -4 : 0; x < 16; x += 8) {
-      const x0 = max(0, x + 1);
-      box(grey(base + floor(rand() * 14) - 7), ox + x0, y + 1, min(16, x + 8) - x0, i === 2 ? 5 : 4);
-    }
-  });
-  // speckle
-  for (let i = 0; i < 10; i++) box(grey(base + (rand() > 0.5 ? 14 : -10)), ox + floor(rand() * 16), floor(rand() * 16), 1, 1);
-  // rain-slick top edge
-  if (top) rects('E00g1 401g1 G3031b021', ox);
+// One 16px tile of packed dirt at `ox`; `top` gets a dry grass crust.
+function dirt(ox, rand, top) {
+  box('#2c2117', ox, 0, 16, 16);
+  for (let i = 0; i < 8; i++) box(i % 2 ? '#35281a' : '#1d150e', ox + floor(rand() * 14), floor(rand() * 15), 2, 1);
+  if (top) box('#6b573a', ox, 0, 16, 1);
+}
+
+// One 16px tile of cave rock.
+function rock(ox, rand, top) {
+  box('#1b1814', ox, 0, 16, 16);
+  for (let i = 0; i < 4; i++) box(i % 2 ? '#282320' : '#33302a', ox + floor(rand() * 11), floor(rand() * 13), 5, 3);
+  if (top) box('#4a463e', ox, 0, 16, 1);
+}
+
+// One 16px tile of ruin stone (the church).
+function stone(ox, rand, top) {
+  box('#1a1815', ox, 0, 16, 16);
+  for (let i = 0; i < 6; i++) box(i % 2 ? '#3a352e' : '#2c2822', ox + floor(rand() * 12), floor(rand() * 14), 4, 2);
+  box('#0d0c0a', ox, 7, 16, 1);
+  box('#0d0c0a', ox + 7, 0, 1, 7);
+  if (top) box('#69625a', ox, 0, 16, 1);
+}
+
+// Dark interior wall behind the open rooms.
+function wall(ox, rand, cave) {
+  box(cave ? '#12100d' : '#1a140d', ox, 0, 16, 16);
+  for (let i = 0; i < 6; i++) box('#0d0b09', ox + floor(rand() * 14), floor(rand() * 14), 2, 1);
 }
 
 function makeTiles() {
   const rand = rng(7);
-  fromCanvas('tiles', 80, 16, () => {
-    brick(0, rand, 0x3a, 0x14);
-    brick(16, rand, 0x3a, 0x14, true);
+  fromCanvas('tiles', 160, 16, () => {
+    dirt(0, rand, false);
+    dirt(16, rand, true);
     // wooden beam (one-way)
     rects('o00g6 z00g4 C00g1 t2251a141 l1425d425', 32);
-    // background walls (dark, low contrast)
-    brick(48, rand, 0x1c, 0x0d);
-    brick(64, rand, 0x16, 0x0a);
+    wall(48, rand, false);
+    wall(64, rand, true);
+    rock(80, rand, false);
+    rock(96, rand, true);
+    stone(112, rand, false);
+    stone(128, rand, true);
+    box('k', 144, 0, 16, 16); // buried rock: pure black
   });
 
   fromCanvas('cracked', 16, 16, () => {
-    brick(0, rand, 0x4a, 0x1a);
+    rock(0, rand, false);
     rects('k801272128412661278129a128c12ae129f1235419a41 D93115911');
     // yellow paint daubed across it: this stone can be broken
-    for (let i = 0; i < 12; i++) box('N', 2 + i, 13 - i, 2, 2);
-    rects('N1132cd32 O4e12d413');
+    for (let i = 0; i < 8; i++) box('N', 2 + i, 13 - i, 2, 2);
+    rects('N1132cd32');
   });
 
   fromCanvas('spikes', 16, 16, () => {
@@ -784,7 +817,7 @@ function makeTiles() {
   fromCanvas('veil', 32, 32, () => {
     const r = rng(99);
     box('k', 0, 0, 32, 32);
-    for (let i = 0; i < 70; i++) {
+    for (let i = 0; i < 28; i++) {
       const x = floor(r() * 32);
       const y = floor(r() * 32);
       const l = 2 + floor(r() * 8);
@@ -794,24 +827,28 @@ function makeTiles() {
   });
 }
 
+// A leafless llanos tree: recursive limbs, drawn thick and gnarled.
+function drawTree(x0, y0, len, w, r) {
+  const b = (x, y, a, l, w) => {
+    if (l < 5 || w < 1) return;
+    const x2 = x + cos(a) * l;
+    const y2 = y + sin(a) * l;
+    pen.lineWidth = w;
+    pen.beginPath();
+    pen.moveTo(x, y);
+    pen.lineTo(x2, y2);
+    pen.stroke();
+    b(x2, y2, a - 0.35 - r() * 0.4, l * 0.72, w * 0.68);
+    b(x2, y2, a + 0.3 + r() * 0.4, l * 0.68, w * 0.68);
+  };
+  b(x0, y0, -PI / 2, len, w);
+}
+
 function makeProps() {
-  fromCanvas('tree', 70, 110, () => {
-    ink('a');
+  fromCanvas('tree', 70, 112, () => {
+    ink('M');
     pen.lineCap = 'round';
-    const r = rng(3);
-    const branch = (x, y, a, len, w) => {
-      if (len < 5 || w < 1) return;
-      const x2 = x + cos(a) * len;
-      const y2 = y + sin(a) * len;
-      pen.lineWidth = w;
-      pen.beginPath();
-      pen.moveTo(x, y);
-      pen.lineTo(x2, y2);
-      pen.stroke();
-      branch(x2, y2, a - 0.35 - r() * 0.4, len * 0.72, w * 0.68);
-      branch(x2, y2, a + 0.3 + r() * 0.4, len * 0.68, w * 0.68);
-    };
-    branch(35, 110, -PI / 2, 36, 7);
+    drawTree(35, 112, 38, 7, rng(3));
   });
   fromCanvas('window', 32, 72, () => {
     const arch = path('M2 72L2 24Q2 4 16 0Q30 4 30 24L30 72Z');
@@ -844,20 +881,40 @@ function makeProps() {
     ink('4');
     circle(32, 32, 30, true);
   });
-  fromCanvas('vault', 128, 48, () => {
-    ink('q');
-    pen.lineWidth = 4;
-    pen.stroke(path('M0 48Q0 6 64 0Q128 6 128 48'));
-    ink('j');
-    pen.lineWidth = 2;
-    pen.stroke(path('M12 48Q14 14 64 8Q114 14 116 48'));
-  });
   fromCanvas('bell', 48, 52, () => {
     ink('o');
     pen.fill(path('M20 2L28 2Q38 4 39 22Q40 38 47 46L1 46Q8 38 9 22Q10 4 20 2'));
     ink('B');
     pen.fill(path('M21 4L27 4Q36 6 37 22Q38 37 44 44L4 44Q10 37 11 22Q12 6 21 4'));
     rects('Efa3s xva3u6EA2 lmI48 Rkk82ng2a');
+  });
+  fromCanvas('scrub', 26, 12, () => {
+    const r = rng(17);
+    pen.lineWidth = 1;
+    for (let i = 0; i < 9; i++) {
+      const x = 2 + r() * 22;
+      ink('#3f3d1c');
+      pen.beginPath();
+      pen.moveTo(x, 12);
+      pen.lineTo(x + (r() - 0.5) * 8, 12 - 3 - r() * 8);
+      pen.stroke();
+    }
+  });
+  fromCanvas('stalagmite', 20, 24, () => {
+    ink('#0c0a08');
+    pen.fill(path('M10 0L19 24L1 24Z'));
+    ink('#464039');
+    pen.fill(path('M10 0L14 24L6 24Z'));
+  });
+  // The child's cabin: dark planks, a lit window and a stooped roof.
+  fromCanvas('house', 60, 54, () => {
+    box('#080604', 6, 22, 48, 32);
+    box('#241a10', 8, 24, 44, 28);
+    ink('#080604');
+    pen.fill(path('M0 24L30 4L60 24Z'));
+    box('#080604', 22, 34, 14, 20);
+    box('#3a2a18', 23, 35, 12, 19);
+    box('#e0a030', 39, 28, 14, 12);
   });
 }
 
@@ -967,50 +1024,88 @@ function label(scene, x, y, text, tint = 0xffffff, scale = 1) {
 
 function makeBackdrops() {
   fromCanvas('sky', 640, 480, () => {
-    box(gradient(pen.createLinearGradient(0, 0, 0, 480), 0, 'a', 0.6, 'i', 1, 'q'), 0, 0, 640, 480);
+    const g = pen.createLinearGradient(0, 0, 0, 480);
+    g.addColorStop(0, '#04050a');
+    g.addColorStop(0.55, '#141118');
+    g.addColorStop(0.8, '#2a1d19');
+    g.addColorStop(1, '#3c2b1c');
+    ink(g);
+    pen.fillRect(0, 0, 640, 480);
     const r = rng(21);
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 56; i++) {
       const x = r() * 700 - 30;
-      const y = r() * 270;
+      const y = r() * 260;
       const w = 60 + r() * 140;
-      ink(`rgba(${r() > 0.5 ? '40,40,40' : '20,20,20'},0.5)`);
+      ink(`rgba(${r() > 0.5 ? '34,30,30' : '16,14,18'},0.5)`);
       pen.beginPath();
       pen.ellipse(x, y, w / 2, 8 + r() * 14, 0, 0, PI * 2);
       pen.fill();
     }
   });
 
-  fromCanvas('spires', 640, 480, () => {
+  // Far savanna: flat horizon, a ragged treeline and one church ruin.
+  fromCanvas('hills', 640, 480, () => {
     const r = rng(5);
-    for (let x = 0; x < 640; ) {
-      const w = 30 + r() * 60;
-      const h = 124 + r() * 140;
-      const top = 480 - h;
-      box('d', x, top, w, h);
-      // spire
-      pen.fill(path(`M${x + w * 0.2} ${top}L${x + w / 2} ${top - 30 - r() * 60}L${x + w * 0.8} ${top}`));
-      // pinnacles
-      pen.fillRect(x, top - 10, 3, 10);
-      pen.fillRect(x + w - 3, top - 10, 3, 10);
-      // dim windows
-      if (r() > 0.4) {
-        ink(r() > 0.8 ? 'Q' : 'm');
-        circle(x + w / 2, top + 30, 6);
-      }
-      x += w + r() * 20;
+    box('#0a0908', 0, 340, 640, 140);
+    ink('#0a0908');
+    pen.beginPath();
+    pen.moveTo(0, 352);
+    for (let x = 0; x <= 640; x += 64) pen.lineTo(x, 340 - r() * 10);
+    pen.lineTo(640, 480);
+    pen.lineTo(0, 480);
+    pen.closePath();
+    pen.fill();
+    for (let x = 8; x < 640; x += 44 + r() * 60) {
+      const h = 18 + r() * 26;
+      box('#060605', x, 340 - h, 8, h + 6);
     }
+    box('#0d0c0b', 150, 296, 30, 44);
+    ink('#0d0c0b');
+    pen.fill(path('M144 296L165 272L186 296Z'));
+    box('#2a0008', 162, 312, 6, 12);
   });
 
-  fromCanvas('buttress', 640, 480, () => {
+  // Nearer grove of dry trees and scrub, darker than the horizon.
+  fromCanvas('grove', 640, 480, () => {
     const r = rng(8);
-    box('a', 0, 420, 640, 60);
-    for (let x = 0; x < 640; x += 160) {
-      const h = 140 + r() * 60;
-      const y = 480 - h;
-      pen.fillRect(x + 10, y, 26, h);
-      // pinnacle, then the flying arch
-      pen.fill(path(`M${x + 23} ${y - 40}L${x + 10} ${y}L${x + 36} ${y}`));
-      pen.fill(path(`M${x + 36} ${y + 20}Q${x + 100} ${y + 10} ${x + 150} 420L${x + 140} 420Q${x + 95} ${y + 30} ${x + 36} ${y + 34}`));
+    box('#050504', 0, 430, 640, 50);
+    ink('#050504');
+    pen.lineCap = 'round';
+    for (let x = -10; x < 660; x += 90 + r() * 100) drawTree(x, 440, 40 + r() * 40, 4 + r() * 3, r);
+  });
+
+  // Mid forest: tall dark trunks with roots and hanging limbs.
+  fromCanvas('forestmid', 640, 480, () => {
+    const r = rng(53);
+    for (let x = -20; x < 660; x += 84 + r() * 80) {
+      const w = 10 + r() * 16;
+      box('#0b0b0e', x, 0, w, 480);
+      ink('#0b0b0e');
+      pen.fill(path(`M${x} 480L${x - 9} 480L${x + 2} 436Z`));
+      pen.fill(path(`M${x + w} 480L${x + w + 9} 480L${x + w - 2} 436Z`));
+      pen.fillRect(x + r() * w, 0, 2, 50 + r() * 80);
+    }
+    box('#0b0b0e', 0, 0, 640, 12);
+  });
+
+  // Foreground trunks that sweep in front of the camera (Blasphemous columns).
+  fromCanvas('foretrees', 320, 480, () => {
+    const r = rng(67);
+    for (let i = 0; i < 2; i++) {
+      const x = 40 + i * 180 + r() * 40;
+      const w = 18 + r() * 16;
+      box('#030303', x, 0, w, 480);
+      ink('#030303');
+      for (let j = 0; j < 4; j++) {
+        const y = 20 + r() * 300;
+        const len = 40 + r() * 90;
+        pen.fillRect(r() > 0.5 ? x + w : x - len, y, len, 5);
+      }
+      for (let j = 0; j < 5; j++) {
+        pen.beginPath();
+        pen.arc(x + w / 2 + (r() - 0.5) * 90, 12 + r() * 44, 10 + r() * 20, 0, PI * 2);
+        pen.fill();
+      }
     }
   });
 }
@@ -1053,10 +1148,13 @@ function makeFx() {
 // (the top of the ground under it), so its feet are at y * 16.
 
 const T = 16;
-const W = 192;
+const OX = 96; // tiles of intro forest prepended before the old world
+const BASE_W = 192; // width of the world before the forest was prepended
+const W = BASE_W + OX;
 const ARENA_X = 150; // first column of the ruins where El Silbon is fought
 const ARENA_Y = 30;
 const H = 40;
+const CAVE_Y = 28;
 const SCREEN_W = 640;
 const SCREEN_H = 480;
 
@@ -1088,36 +1186,38 @@ function buildWorld() {
     for (let x = x1; x <= x2; x++) one('spikes', x, y, abyss);
   };
 
-  // World shell
+  // World shell (the forest is prepended later, so this is the base world)
   fill(0, 0, 1, H - 1);
-  fill(W - 2, 0, W - 1, H - 1);
-  fill(0, H - 2, W - 1, H - 1);
+  fill(BASE_W - 2, 0, BASE_W - 1, H - 1);
+  fill(0, H - 2, BASE_W - 1, H - 1);
   fill(ARENA_X - 2, 0, ARENA_X - 1, H - 1); // belfry's outer wall; the ruins lie beyond it
-  fill(ARENA_X, ARENA_Y, W - 3, H - 3);
+  fill(ARENA_X, ARENA_Y, BASE_W - 3, H - 3);
 
-  // Graveyard (the child starts at 5, 26)
+  // Llanos flatlands: dry earth, leafless trees and low scrub.
   fill(2, 26, 33, 37);
   fill(12, 25, 16, 25);
   fill(24, 24, 27, 25);
   one('shrine', 8, 26, true); // already lit
   e('tree', 3, 26);
-  one('tree', 21, 26, true); // flipped
-  e('grave', 10, 26, 14, 25, 18, 26, 29, 26);
-  e('cross', 25, 24, 31, 26);
+  one('tree', 12, 25, true); // flipped
+  e('tree', 21, 26);
+  one('tree', 29, 26, true); // flipped
+  e('scrub', 10, 26, 18, 26, 31, 26);
+  one('scrub', 24, 24);
+  e('grave', 14, 25);
+  e('cross', 25, 24);
   e('shade', 20, 26);
   e('candle', 11, 26, 30, 26);
 
-  // Cathedral facade with a veiled door.
+  // Cave mouth into the cerro, sealed by a veiled door.
   fill(34, 0, 35, 20);
   fill(34, 26, 35, 37);
   one('veil', 34, 21, 2, 5); // width, height
 
-  // Nave
-  fill(36, 0, 89, 3); // vaulted ceiling
-  fill(36, 26, 89, 27); // floor (the crypt lies below)
+  // Open hillside: the long climb up the cerro, sky and grove behind.
+  fill(36, 26, 89, 27); // hillside floor (the crypt lies below)
   fill(88, 0, 89, 6); // right wall, upper
   fill(88, 11, 89, 37); // right wall, lower (opening at rows 7-10 onto the chasm)
-  inside(36, 4, 87, 25);
 
   beam(40, 45, 23);
   beam(49, 53, 20);
@@ -1128,14 +1228,19 @@ function buildWorld() {
   e('shrine', 38, 26);
   one('tool', 78, 11, 'crowbar');
   cracked(44, 26, 46, 27); // way down into the crypt
+  e('tree', 40, 26);
+  one('tree', 52, 26, true);
+  e('tree', 68, 26);
+  e('tree', 86, 11);
+  one('stalagmite', 37, 26);
+  one('scrub', 43, 23);
+  one('scrub', 51, 20);
+  one('scrub', 58, 17);
+  one('scrub', 65, 14);
+  e('scrub', 75, 11, 83, 11, 50, 26, 84, 26);
+  e('candle', 71, 11, 86, 11);
   e('shade', 58, 26, 78, 26);
   e('bat', 55, 12, 74, 7);
-  e('candelabra', 41, 26, 62, 26, 72, 26);
-  e('candle', 71, 11, 86, 11);
-  e('pillar', 39, 4, 48, 4, 57, 4, 66, 4, 75, 4, 84, 4);
-  e('window', 43, 5, 52, 5, 70, 5, 79, 5);
-  e('rose', 61, 5);
-  e('vault', 39, 4, 48, 4, 57, 4, 66, 4, 75, 4);
 
   // Crypt
   fill(36, 36, 87, 37); // crypt floor
@@ -1150,8 +1255,8 @@ function buildWorld() {
   e('shade', 52, 36, 77, 36);
   e('bat', 75, 31);
   e('candle', 40, 36, 65, 36, 80, 36);
-  e('cross', 38, 36);
-  e('grave', 44, 36, 74, 36);
+  e('stalagmite', 38, 36, 44, 36, 74, 36);
+  e('stalactite', 40, 28, 47, 28, 54, 28, 63, 28, 70, 28, 79, 28, 85, 28);
   // Shaft back up to the nave.
   fill(85, 26, 87, 27, EMPTY);
   beam(85, 87, 33);
@@ -1178,7 +1283,38 @@ function buildWorld() {
   e('bat', 138, 5, 124, 4);
   e('candle', 116, 17, 126, 9, 140, 9);
   e('window', 117.5, 11, 137.5, 11, 136.5, 3);
+  e('rose', 126.5, 2);
+  one('candelabra', 132, 9);
   e('bell', 116.5, 2);
+
+  // Slide the whole built world right, leaving the forest in front of it.
+  for (let y = 0; y < H; y++) {
+    for (let x = W - 1; x >= OX; x--) {
+      grid[y][x] = grid[y][x - OX];
+      interior[y][x] = interior[y][x - OX];
+    }
+    for (let x = 0; x < OX + 2; x++) {
+      grid[y][x] = EMPTY;
+      interior[y][x] = 0;
+    }
+  }
+  for (const ent of ents) ent.x += OX;
+
+  // World shell
+  fill(0, 0, 1, H - 1);
+  fill(W - 2, 0, W - 1, H - 1);
+  fill(0, H - 2, W - 1, H - 1);
+
+  // Intro forest: the child leaves the house and walks east toward the llanos.
+  fill(2, 26, OX + 1, H - 1); // floor + buried rock, which the biome draws black
+  one('house', 6, 26);
+  one('shrine', 12, 26, true); // the cabin is the first checkpoint
+  for (let i = 0; i < 13; i++) {
+    const x = 21 + i * 6;
+    one('tree', x, 26, i % 3 === 1, 1.3 + (i % 4) * 0.35);
+  }
+  for (let x = 24; x <= OX - 2; x += 9) one('scrub', x, 26);
+  e('foresteyes', 19, 23, 30, 26, 42, 25, 54, 24, 66, 27, 78, 23, 90, 25);
 
   return { grid, interior, ents };
 }
@@ -1443,8 +1579,8 @@ class TitleScene extends Phaser.Scene {
     this.st = new Storm(this, 2500, 6000);
     this.st.ot = (p) => this.gl.hi(0.5 * p);
 
-    backdrop(this, 'spires', 84, -22);
-    backdrop(this, 'buttress', 70, -21);
+    backdrop(this, 'hills', 84, -22);
+    backdrop(this, 'grove', 70, -21);
 
     image(this, mid, ground, 'child', 10, 0.5, 1, 0).setScale(2);
     this.add.rectangle(0, ground, SCREEN_W, 36, 0x050505).setOrigin(0).setDepth(9);
@@ -1454,6 +1590,7 @@ class TitleScene extends Phaser.Scene {
 
     this.ts = image(this, mid + 3, 98, 'logo', 20).setScale(LOGO_SCALE).setTintFill(0xb00010);
     this.tt = image(this, mid, 96, 'logo', 21).setScale(LOGO_SCALE);
+    label(this, mid, 150, 'UNA TORMENTA SOBRE LOS LLANOS', 0x8c8c8c).setDepth(21);
     // Controls, shown rather than told: what the child does, then the button that does it.
     const img = (x, y, key, frame) => image(this, x, y, key, 21, 0.5, 0.5, frame).setScale(2);
     const gfx = this.add.graphics().setDepth(21);
@@ -1543,12 +1680,15 @@ const PROPS = {
   tree: [1, -3, 2],
   grave: [1, -2, 1],
   cross: [1, -2, 1],
+  scrub: [1, -2, 1],
+  stalagmite: [1, -1, 1],
+  stalactite: [0, -1, 0],
+  house: [1, -1, 2],
   candle: [1, -1, 0],
   candelabra: [1, -1, 0],
   window: [0, -7, 0],
   rose: [0, -7, 0],
   bell: [0, -1, 0],
-  vault: [0, -7, 0],
 };
 
 class GameScene extends Phaser.Scene {
@@ -1580,8 +1720,10 @@ class GameScene extends Phaser.Scene {
     this.st.ot = (p) => this.gl.hi(0.35 * p);
     cam.fadeIn(900, 0, 0, 0);
 
-    this.sf = backdrop(this, 'spires', 0, -22);
-    this.bt = backdrop(this, 'buttress', 0, -21);
+    this.k1 = backdrop(this, 'hills', 0, -22);
+    this.k2 = backdrop(this, 'grove', 0, -21);
+    this.k4 = backdrop(this, 'forestmid', 0, -24);
+    this.k5 = backdrop(this, 'foretrees', 0, 60);
     this.bm();
     this.bx();
     this.be();
@@ -1611,23 +1753,39 @@ class GameScene extends Phaser.Scene {
 
   bm() {
     const { grid, interior } = this.ln;
-    const rand = new Phaser.Math.RandomDataGenerator(['bg']);
     const layer = (data, depth) => {
       const map = this.make.tilemap({ data, tileWidth: T, tileHeight: T });
       return map.createLayer(0, map.addTilesetImage('tiles', 'tiles', T, T, 0, 0), 0, 0).setDepth(depth);
     };
+    // A thin crust of textured rock over pure black. Only exposed faces and the
+    // cave are drawn; everything buried is opaque darkness, so the world never
+    // shows through to the other side.
+    const CAVE_L = 34 + OX;
+    const CAVE_R = 89 + OX;
+    const inCave = (x, y) => x >= CAVE_L && x <= CAVE_R && y >= CAVE_Y - 1;
+    const exposed = (x, y, top) =>
+      top ||
+      (y > 1 && grid[y - 1][x] === SOLID && grid[y - 2][x] !== SOLID) ||
+      (x > 0 && grid[y][x - 1] === EMPTY) ||
+      (x < W - 1 && grid[y][x + 1] === EMPTY) ||
+      (y < H - 1 && grid[y + 1][x] === EMPTY);
+    const solid = (x, y, top) => {
+      if (inCave(x, y)) return top ? TILE_ROCK_TOP : TILE_ROCK;
+      if (!exposed(x, y, top)) return TILE_BLACK;
+      if (x >= 106 + OX && y < CAVE_Y) return top ? TILE_STONE_TOP : TILE_STONE;
+      if (y >= CAVE_Y) return top ? TILE_ROCK_TOP : TILE_ROCK;
+      return top ? TILE_DIRT_TOP : TILE_DIRT;
+    };
+    const bg = (x, y) => (y >= CAVE_Y ? TILE_CAVE : x >= 106 + OX ? TILE_STONE : TILE_BG);
 
-    layer(
-      interior.map((row) => row.map((v) => (v ? (rand.frac() < 0.3 ? TILE_BG_ALT : TILE_BG) : -1))),
-      -10,
-    );
+    layer(interior.map((row, y) => row.map((v, x) => (v ? bg(x, y) : -1))), -10);
     this.ly = layer(
       grid.map((row, y) =>
-        row.map((v, x) => (v === SOLID ? (y > 0 && grid[y - 1][x] !== SOLID ? TILE_BRICK_TOP : TILE_BRICK) : v === BEAM ? TILE_BEAM : -1)),
+        row.map((v, x) => (v === SOLID ? solid(x, y, y > 0 && grid[y - 1][x] !== SOLID) : v === BEAM ? TILE_BEAM : -1)),
       ),
       0,
     );
-    this.ly.setCollision([TILE_BRICK, TILE_BRICK_TOP]);
+    this.ly.setCollision([TILE_DIRT, TILE_DIRT_TOP, TILE_ROCK, TILE_ROCK_TOP, TILE_STONE, TILE_STONE_TOP, TILE_BLACK]);
     this.ly.forEachTile((t) => {
       if (t.index === TILE_BEAM) t.setCollision(false, false, true, false);
     });
@@ -1666,7 +1824,7 @@ class GameScene extends Phaser.Scene {
       const px = x * T + 8;
       const py = y * T;
       const prop = PROPS[type];
-      let s = prop && image(this, px, py + prop[2], type, prop[1], type === 'vault' ? 0 : 0.5, prop[0]);
+      let s = prop && image(this, px, py + prop[2], type, prop[1], 0.5, prop[0]);
       switch (type) {
         case 'shrine':
           this.sx.push((s = image(this, px, py, 'shrine', 2, 0.5, 1)));
@@ -1674,7 +1832,26 @@ class GameScene extends Phaser.Scene {
           break;
         case 'tree':
           s.setFlipX(!!a);
+          if (b) s.setScale(b);
           break;
+        case 'house':
+          this.al(px + 16, py - 19, 64);
+          break;
+        case 'stalactite':
+          s.setFlipY(true);
+          break;
+        case 'foresteyes': {
+          const ey = image(this, px, py, 'eyes', -5).setScale(1.4).setAlpha(0.5);
+          this.tweens.add({
+            targets: ey,
+            alpha: { from: 0.12, to: 0.85 },
+            duration: 1600 + random() * 1400,
+            yoyo: true,
+            repeat: -1,
+            delay: random() * 2000,
+          });
+          break;
+        }
         case 'candle':
           this.af(px, py - 10, 34);
           break;
@@ -1686,9 +1863,6 @@ class GameScene extends Phaser.Scene {
           break;
         case 'pillar':
           this.add.tileSprite(px, py, 20, 22 * T, 'pillar').setOrigin(0.5, 0).setDepth(-8);
-          break;
-        case 'vault':
-          s.setDisplaySize(9 * T, 48);
           break;
         case 'bell':
           this.ba = s;
@@ -1789,7 +1963,7 @@ class GameScene extends Phaser.Scene {
 
   bp() {
     const physics = this.physics.add;
-    const p = (this.pl = physics.sprite(5.5 * T, 26 * T, 'child', 0));
+    const p = (this.pl = physics.sprite(9.5 * T, 26 * T, 'child', 0));
     p.setOrigin(0.5, 1).setDepth(10).setCollideWorldBounds(true);
     p.body.setSize(10, 20).setOffset(3, 4).setMaxVelocityY(620);
 
@@ -2339,10 +2513,10 @@ class GameScene extends Phaser.Scene {
     const tx = p.x / T;
     const ty = p.y / T;
     const at = (x0, x1, y0, y1) => tx > x0 && tx < x1 && ty > y0 && ty < y1;
-    if (at(27, 34, 0, H)) this.hn('veil', 'Un velo de sombra viva. Alumbralo con la linterna.');
-    if (at(84, 90, 0, 12) && !this.fn.has('umbrella')) this.hn('chasm', 'Muy lejos para saltar... si tan solo algo frenara la caida.', 4000);
-    if (this.fn.has('crowbar') && at(40, 48, 20, 27) && this.cr.has('45,26')) this.hn('floor', 'El piso aqui esta agrietado...');
-    if (at(110, 130, 0, 9)) this.hn('bell', 'La gran campana. Hazla sonar.');
+    if (at(27 + OX, 34 + OX, 0, H)) this.hn('veil', 'Un velo de sombra viva. Alumbralo con la linterna.');
+    if (at(84 + OX, 90 + OX, 0, 12) && !this.fn.has('umbrella')) this.hn('chasm', 'Muy lejos para saltar... si tan solo algo frenara la caida.', 4000);
+    if (this.fn.has('crowbar') && at(40 + OX, 48 + OX, 20, 27) && this.cr.has(45 + OX + ',26')) this.hn('floor', 'El piso aqui esta agrietado...');
+    if (at(110 + OX, 130 + OX, 0, 9)) this.hn('bell', 'La gran campana. Hazla sonar.');
     if (aiming) this.hn('freeaim', 'APUNTADO LIBRE - manten BOTON 2 y apunta con el joystick.', 3000);
 
     // Free-aim reticle.
@@ -2426,6 +2600,12 @@ class GameScene extends Phaser.Scene {
         .setRotation(c.angle)
         .setAlpha((this.fs ? 0.2 : 0.12) * this.fl);
     }
+
+    // Deep in the cave the roof seals the world above into pure darkness.
+    if (p.x > (34 + OX) * T && p.x < (89 + OX) * T && p.y > CAVE_Y * T) {
+      const ceil = (CAVE_Y - 1) * T - sy;
+      if (ceil > 0) dark.fill(0, 1, 0, 0, SCREEN_W, ceil);
+    }
   }
 
   // He was behind you the whole time. The far-off whistle, the castle coming down, then the ruins.
@@ -2464,11 +2644,10 @@ class GameScene extends Phaser.Scene {
     });
   }
 
-  // Show or hide the standing castle's skyline and fence the camera to match.
+  // Show or hide the llanos skyline and fence the camera to match.
   ss(on) {
-    const x0 = on ? ARENA_X * T : 0;
-    this.sf.setVisible(!on);
-    this.bt.setVisible(!on);
+    const x0 = on ? (ARENA_X + OX) * T : 0;
+    for (const l of [this.k1, this.k2, this.k4, this.k5]) l.setVisible(!on);
     this.cm.setBounds(x0, 0, (on ? W - 2 : W) * T - x0, H * T);
   }
 
@@ -2476,7 +2655,7 @@ class GameScene extends Phaser.Scene {
   sz() {
     const p = this.pl;
     const physics = this.physics.add;
-    const x0 = ARENA_X * T;
+    const x0 = (ARENA_X + OX) * T;
     const gy = ARENA_Y * T;
     this.ss(true);
     this.bb = this.ba;
@@ -2593,7 +2772,7 @@ class GameScene extends Phaser.Scene {
     this.th = this.cu = true;
     this.bn.clear(true, true);
     const clamp = Phaser.Math.Clamp;
-    const x0 = ARENA_X * T;
+    const x0 = (ARENA_X + OX) * T;
     const gy = ARENA_Y * T;
     const side = this.pl.x > x0 + 320 ? -1 : 1;
     const x = clamp(this.pl.x + side * 130, x0 + 30, x0 + 610);
@@ -2691,11 +2870,36 @@ class GameScene extends Phaser.Scene {
     this.up(time);
     this.ur();
     this.st.update(dt);
-    // Parallax.
-    this.sf.tilePositionX = cam.scrollX * 0.1;
-    this.sf.y = 10 - cam.scrollY * 0.06;
-    this.bt.tilePositionX = cam.scrollX * 0.25;
-    this.bt.y = 21 - cam.scrollY * 0.15;
+    // Parallax: the woods cross-fade into the open llanos as the child walks east.
+    const forest = 1 - min(1, max(0, (this.pl.x - (OX - 4) * T) / (14 * T)));
+    this.k1.tilePositionX = cam.scrollX * 0.1;
+    this.k1.y = 10 - cam.scrollY * 0.06;
+    this.k2.tilePositionX = cam.scrollX * 0.25;
+    this.k2.y = 21 - cam.scrollY * 0.15;
+    this.k4.tilePositionX = cam.scrollX * 0.5;
+    this.k5.tilePositionX = cam.scrollX * 1.35;
+    this.k1.setAlpha(1 - forest);
+    this.k2.setAlpha(1 - forest);
+    this.k4.setAlpha(forest);
+    this.k5.setAlpha(forest);
+
+    // On the flat approach the camera holds still vertically, so the woods do
+    // not lurch every time the child jumps; the cerro resumes the follow.
+    const flat = this.pl.x < (OX + 34) * T;
+    if (flat !== this.fz) {
+      this.fz = flat;
+      cam.setDeadzone(flat ? 1 : 0, flat ? 600 : 0);
+    }
+
+    // The storm is muffled inside the cave and inside the church.
+    const indoors =
+      (this.pl.x > (34 + OX) * T && this.pl.x < (89 + OX) * T && this.pl.y > CAVE_Y * T) ||
+      (this.pl.x > (106 + OX) * T && this.pl.y < CAVE_Y * T);
+    if (indoors !== this.ir) {
+      this.ir = indoors;
+      setRainVolume(indoors ? 0.5 : 1);
+    }
+
     this.gl.tk(dt);
     this.ud(time);
 
