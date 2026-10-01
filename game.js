@@ -1,4 +1,5 @@
 // El Apagón — a gothic-horror metroidvania for the Platanus Hack 26 arcade.
+(() => {
 
 // DO NOT replace existing keys — they match the physical arcade cabinet wiring.
 const CABINET_KEYS = {
@@ -2861,3 +2862,4 @@ new Phaser.Game({
   },
   scene: [BootScene, TitleScene, GameScene, HudScene],
 });
+})();
