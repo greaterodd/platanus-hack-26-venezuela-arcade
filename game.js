@@ -1281,9 +1281,9 @@ function makeFx(scene) {
 // The whole map, built from rectangles on a tile grid.
 //
 // Route (each gate needs a tool):
-//   Graveyard ──veil(flashlight)──▶ Nave ──climb──▶ Gallery (crowbar)
-//   Nave floor ──cracked stone(crowbar)──▶ Crypt ──veil──▶ Umbrella ──shaft──▶ Nave
-//   Gallery ──chasm(glide: umbrella)──▶ Belfry ──cracked wall──▶ ──veil──▶ Great Bell
+//   Llanos ──veil(flashlight)──▶ cave mouth ──climb the cerro──▶ Gallery (crowbar)
+//   Hillside ──cracked rock(crowbar)──▶ Crypt ──veil──▶ Umbrella ──shaft──▶ Hillside
+//   Gallery ──chasm(glide: umbrella)──▶ Church ──cracked wall──▶ ──veil──▶ Great Bell
 //
 // Entity coordinates are in tiles; `y` is the row the entity stands on
 // (the top of the ground under it), so its feet are at y * 16.
@@ -1339,17 +1339,15 @@ function buildWorld() {
   e('candle', 11, 26);
   e('candle', 30, 26);
 
-  // Abandoned church facade with a veiled door.
+  // Cave mouth into the cerro, sealed by a veiled door.
   fill(34, 0, 35, 20);
   fill(34, 26, 35, 37);
   e('veil', 34, 21, { w: 2, h: 5 });
 
-  // Nave
-  fill(36, 0, 89, 3); // vaulted ceiling
-  fill(36, 26, 89, 27); // floor (the crypt lies below)
+  // Open hillside: the long climb up the cerro, sky and grove behind.
+  fill(36, 26, 89, 27); // hillside floor (the crypt lies below)
   fill(88, 0, 89, 6); // right wall, upper
   fill(88, 11, 89, 37); // right wall, lower (opening at rows 7-10 onto the chasm)
-  fill(36, 4, 87, 25, 1, interior);
 
   beam(40, 45, 23);
   beam(49, 53, 20);
@@ -1360,19 +1358,25 @@ function buildWorld() {
   e('shrine', 38, 26);
   e('tool', 78, 11, { tool: 'crowbar' });
   cracked(44, 26, 46, 27); // way down into the crypt
+  e('tree', 40, 26);
+  e('tree', 52, 26, { flip: true });
+  e('tree', 68, 26);
+  e('tree', 86, 11);
+  e('stalagmite', 37, 26);
+  e('scrub', 43, 23);
+  e('scrub', 51, 20);
+  e('scrub', 58, 17);
+  e('scrub', 65, 14);
+  e('scrub', 75, 11);
+  e('scrub', 83, 11);
+  e('scrub', 50, 26);
+  e('scrub', 84, 26);
+  e('candle', 71, 11);
+  e('candle', 86, 11);
   e('shade', 58, 26);
   e('shade', 78, 26);
   e('bat', 55, 12);
   e('bat', 74, 7);
-  e('candelabra', 41, 26);
-  e('candelabra', 62, 26);
-  e('candelabra', 72, 26);
-  e('candle', 71, 11);
-  e('candle', 86, 11);
-  for (let x = 39; x <= 84; x += 9) e('pillar', x, 4, { h: 22 });
-  for (const x of [43.5, 52.5, 70.5, 79.5]) e('window', x, 5);
-  e('rose', 61.5, 5);
-  for (let x = 39; x < 84; x += 9) e('vault', x, 4);
 
   // Crypt
   fill(36, 36, 87, 37); // crypt floor
@@ -1425,6 +1429,10 @@ function buildWorld() {
   e('window', 118, 11);
   e('window', 138, 11);
   e('window', 137, 3);
+  e('rose', 126.5, 2);
+  e('pillar', 113, 2, { h: 14 });
+  e('pillar', 140, 2, { h: 14 });
+  e('candelabra', 132, 9);
   e('bell', 117, 2);
 
   return { grid, interior, ents };
@@ -1816,14 +1824,14 @@ class GameScene extends Phaser.Scene {
 
   buildTilemaps() {
     const { grid, interior } = this.world;
-    // The mound is layered: dirt on the surface, ruin stone in the church
-    // above row CAVE_Y, and bare cave rock below it.
+    // The mound is layered: packed dirt on the open hillside, bare cave rock
+    // below row CAVE_Y, and ruin stone only in the church at the very end.
     const solidTile = (x, y, top) => {
-      if (x >= 34 && y < CAVE_Y) return top ? TILE.STONE_TOP : TILE.STONE;
+      if (x >= 106 && y < CAVE_Y) return top ? TILE.STONE_TOP : TILE.STONE;
       if (y >= CAVE_Y) return top ? TILE.ROCK_TOP : TILE.ROCK;
       return top ? TILE.DIRT_TOP : TILE.DIRT;
     };
-    const bgTile = (x, y) => (y >= CAVE_Y ? TILE.CAVE : x >= 34 ? TILE.STONE : TILE.BG);
+    const bgTile = (x, y) => (y >= CAVE_Y ? TILE.CAVE : x >= 106 ? TILE.STONE : TILE.BG);
 
     const data = grid.map((row, y) =>
       row.map((v, x) => {
