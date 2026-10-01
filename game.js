@@ -72,7 +72,6 @@ const B_JUMP = 'P1_1';
 const B_USE = 'P1_2';
 const B_PREV = 'P1_5';
 const B_NEXT = 'P1_6';
-const B_MUTE = 'P1_4';
 
 // Audio: everything is synthesised on one shared context, built on the first press.
 
@@ -1148,7 +1147,7 @@ function makeFx() {
 // (the top of the ground under it), so its feet are at y * 16.
 
 const T = 16;
-const OX = 96; // tiles of intro forest prepended before the old world
+const OX = 48; // tiles of intro forest prepended before the old world
 const BASE_W = 192; // width of the world before the forest was prepended
 const W = BASE_W + OX;
 const ARENA_X = 150; // first column of the ruins where El Silbon is fought
@@ -1161,6 +1160,38 @@ const SCREEN_H = 480;
 const EMPTY = 0;
 const SOLID = 1;
 const BEAM = 2; // one-way platform
+
+// A run: `night` counts the bells rung so far, and each one makes the next night harder.
+let night = 0;
+let score = 0;
+let runId = 0; // id of this run, so its saved score is replaced rather than repeated
+// Difficulty multiplier: 1 on the first night, levelling off after six.
+const hard = (k = 0.12) => 1 + min(night, 6) * k;
+const earn = (pts) => (score += floor(pts) * (night + 1));
+// Where the extra monsters of later nights may stand: six shades, then four bats, as x, y pairs.
+const SLOTS = [29, 26, 68, 26, 80, 11, 74, 36, 133, 17, 135, 9, 24, 19, 50, 31, 98, 9, 118, 12];
+
+// Best runs, kept as five [score, night, run, initials] entries under one key.
+const TOP_KEY = 'el-apagon:top';
+async function loadTop() {
+  try {
+    const r = await window.platanusArcadeStorage.get(TOP_KEY);
+    return (r.found && Array.isArray(r.value) ? r.value : []).filter((o) => Array.isArray(o) && o[0] > 0).slice(0, 5);
+  } catch (err) {
+    return [];
+  }
+}
+// Initials are only known once the run is over; each set keeps just its best run.
+async function saveScore(name = '') {
+  const old = (await loadTop()).filter((o) => o[2] !== runId);
+  const prev = old.find((o) => name && o[3] === name);
+  const top = old.filter((o) => o !== prev);
+  top.push(prev && prev[0] > score ? prev : [score, night, runId, name]);
+  top.sort((a, b) => b[0] - a[0]);
+  try {
+    await window.platanusArcadeStorage.set(TOP_KEY, top.slice(0, 5));
+  } catch (err) {}
+}
 
 function buildWorld() {
   const grid = Array.from({ length: H }, () => new Array(W).fill(EMPTY));
@@ -1287,6 +1318,12 @@ function buildWorld() {
   one('candelabra', 132, 9);
   e('bell', 116.5, 2);
 
+  // Later nights: more things wake and the blackout spreads, the same way for every player.
+  // Done before the slide below, so SLOTS stay in the built world's own columns.
+  const r = rng(night * 2654435761);
+  // Walk the slots in strides of three from a random start, so none repeats.
+  for (let i = 0, k = floor(r() * 10); night && i <= min(night, 6); i++, k = (k + 3) % 10) one(k < 6 ? 'shade' : 'bat', SLOTS[k * 2], SLOTS[k * 2 + 1]);
+
   // Slide the whole built world right, leaving the forest in front of it.
   for (let y = 0; y < H; y++) {
     for (let x = W - 1; x >= OX; x--) {
@@ -1309,13 +1346,14 @@ function buildWorld() {
   fill(2, 26, OX + 1, H - 1); // floor + buried rock, which the biome draws black
   one('house', 6, 26);
   one('shrine', 12, 26, true); // the cabin is the first checkpoint
-  for (let i = 0; i < 13; i++) {
+  for (let i = 0; i < 5; i++) {
     const x = 21 + i * 6;
     one('tree', x, 26, i % 3 === 1, 1.3 + (i % 4) * 0.35);
   }
   for (let x = 24; x <= OX - 2; x += 9) one('scrub', x, 26);
-  e('foresteyes', 19, 23, 30, 26, 42, 25, 54, 24, 66, 27, 78, 23, 90, 25);
+  e('foresteyes', 19, 23, 30, 26, 42, 25);
 
+  if (night) return { grid, interior, ents: ents.filter((o) => !/^cand/.test(o.type) || r() > min(0.6, night * 0.15)) };
   return { grid, interior, ents };
 }
 
@@ -1323,9 +1361,60 @@ function buildWorld() {
 // pixel-sort streaks, scanline corruption and film grain.
 // `amount` 0..1 drives how broken the picture gets.
 // Kept flush left and tight: every byte in here counts against the size limit.
-// Kept on one line and with one-letter locals: the shader string survives
-// minification verbatim, so every byte here counts against the size limit.
-const FRAG = `precision highp float;uniform sampler2D uMainSampler;uniform vec2 res;uniform float time;uniform float amount;varying vec2 outTexCoord;float R(vec2 a){vec3 p=fract(vec3(a.xyx)*.1031);p+=dot(p,p.yzx+33.33);return fract((p.x+p.y)*p.z);}float L(vec3 c){return dot(c,vec3(.299,.587,.114));}void main(){vec2 u=outTexCoord;float I=amount;float t=mod(floor(time*14.),251.);float b=floor(u.y*28.);float e=step(1.-I*.4,R(vec2(b,t)))*(R(vec2(b+7.,t))-.5)*.16*I;float l=floor(u.y*res.y);u.x+=e+step(1.-I*.05,R(vec2(l*.37+t*3.1,t+2.)))*(R(vec2(l*1.7,t))-.5)*.06;vec2 k=floor(u*vec2(20.,12.));if(R(k+vec2(t*.37,t*.11))>1.-I*.14){u+=(vec2(R(k+1.3),R(k+2.1))-.5)*.08*(.5+I);}float q=.0012+I*.014;vec2 d=vec2(q,q*.35*sin(time*9.));vec4 o=texture2D(uMainSampler,u);o.r=texture2D(uMainSampler,u+d).r;o.b=texture2D(uMainSampler,u-d).b;if(step(1.-I*.3,R(vec2(floor(u.x*res.x/2.)*.13,b+t)))>.5){vec4 m=o;for(int i=1;i<12;i++){vec4 s=texture2D(uMainSampler,u+vec2(0.,float(i)*3./res.y));if(L(s.rgb)>L(m.rgb)){m=s;}}o=mix(o,m,.6);}o.rgb*=.86+.14*sin(outTexCoord.y*res.y*3.14159);float z=step(1.-max(0.,I-.12)*.03,R(vec2(l*.37+t*13.1,t*7.3+5.)));o.rgb=mix(o.rgb,vec3(R(vec2(l,t))),z*.7);o.rgb+=(R(outTexCoord*res+t*17.)-.5)*(.05+I*.1);gl_FragColor=o;}`;
+// The shader is shipped minified below; this is the same program, readable
+// (res, time and amount are the uniforms r, z and a):
+// precision highp float;
+// uniform sampler2D uMainSampler;
+// uniform vec2 res;
+// uniform float time;
+// uniform float amount;
+// varying vec2 outTexCoord;
+// float rand(vec2 co) {
+// vec3 p = fract(vec3(co.xyx) * .1031);
+// p += dot(p, p.yzx + 33.33);
+// return fract((p.x + p.y) * p.z);
+// }
+// float luma(vec3 c) {
+// return dot(c, vec3(.299, .587, .114));
+// }
+// void main() {
+// vec2 uv = outTexCoord;
+// float I = amount;
+// float t = mod(floor(time * 14.), 251.);
+// float band = floor(uv.y * 28.);
+// float tear = step(1. - I * .4, rand(vec2(band, t))) * (rand(vec2(band + 7., t)) - .5) * .16 * I;
+// float line = floor(uv.y * res.y);
+// uv.x += tear + step(1. - I * .05, rand(vec2(line * .37 + t * 3.1, t + 2.))) * (rand(vec2(line * 1.7, t)) - .5) * .06;
+// vec2 blk = floor(uv * vec2(20., 12.));
+// if (rand(blk + vec2(t * .37, t * .11)) > 1. - I * .14) {
+// uv += (vec2(rand(blk + 1.3), rand(blk + 2.1)) - .5) * .08 * (.5 + I);
+// }
+// float split = .0012 + I * .014;
+// vec2 dir = vec2(split, split * .35 * sin(time * 9.));
+// vec4 col = texture2D(uMainSampler, uv);
+// col.r = texture2D(uMainSampler, uv + dir).r;
+// col.b = texture2D(uMainSampler, uv - dir).b;
+// if (step(1. - I * .3, rand(vec2(floor(uv.x * res.x / 2.) * .13, band + t))) > .5) {
+// vec4 m = col;
+// for (int i = 1; i < 12; i++) {
+// vec4 s = texture2D(uMainSampler, uv + vec2(0., float(i) * 3. / res.y));
+// if (luma(s.rgb) > luma(m.rgb)) { m = s; }
+// }
+// col = mix(col, m, .6);
+// }
+// col.rgb *= .86 + .14 * sin(outTexCoord.y * res.y * 3.14159);
+// float cl = step(1. - max(0., I - .12) * .03, rand(vec2(line * .37 + t * 13.1, t * 7.3 + 5.)));
+// col.rgb = mix(col.rgb, vec3(rand(vec2(line, t))), cl * .7);
+// col.rgb += (rand(outTexCoord * res + t * 17.) - .5) * (.05 + I * .1);
+// gl_FragColor = col;
+// }
+const FRAG = `
+precision highp float;
+uniform sampler2D uMainSampler;
+#define T(x) texture2D(uMainSampler,x)
+#define V vec2
+uniform V r;uniform float z,a;varying V outTexCoord;float R(V c){vec3 p=fract(vec3(c.xyx)*.1031);p+=dot(p,p.yzx+33.33);return fract((p.x+p.y)*p.z);}float L(vec3 c){return dot(c,vec3(.299,.587,.114));}void main(){V u=outTexCoord;float t=mod(floor(z*14.),251.);float b=floor(u.y*28.);float e=step(1.-a*.4,R(V(b,t)))*(R(V(b+7.,t))-.5)*.16*a;float l=floor(u.y*r.y);u.x+=e+step(1.-a*.05,R(V(l*.37+t*3.1,t+2.)))*(R(V(l*1.7,t))-.5)*.06;V k=floor(u*V(20.,12.));if(R(k+V(t*.37,t*.11))>1.-a*.14){u+=(V(R(k+1.3),R(k+2.1))-.5)*.08*(.5+a);}float h=.0012+a*.014;V d=V(h,h*.35*sin(z*9.));vec4 o=T(u);o.r=T(u+d).r;o.b=T(u-d).b;if(step(1.-a*.3,R(V(floor(u.x*r.x/2.)*.13,b+t)))>.5){vec4 m=o;for(int i=1;i<12;i++){vec4 q=T(u+V(0.,float(i)*3./r.y));if(L(q.rgb)>L(m.rgb)){m=q;}}o=mix(o,m,.6);}o.rgb*=.86+.14*sin(outTexCoord.y*r.y*3.14159);float g=step(1.-max(0.,a-.12)*.03,R(V(l*.37+t*13.1,t*7.3+5.)));o.rgb=mix(o.rgb,vec3(R(V(l,t))),g*.7);o.rgb+=(R(outTexCoord*r+t*17.)-.5)*(.05+a*.1);gl_FragColor=o;}
+`;
 
 // Property and method names are two letters to fit the size limit (the minifier
 // cannot shorten them). What each one means:
@@ -1365,6 +1454,7 @@ const FRAG = `precision highp float;uniform sampler2D uMainSampler;uniform vec2 
 //   ua updateBat, ub updateBoss, ud updateDarkness, ul updateTools, un until
 //   uo umbrellaOpen, up updatePickups, ur updateRainSplashes, us updateShade, ut updatePlayer
 //   vg veilGroup, vl veils, wg wasGrounded, wi win, wn won
+//   ns nightStart, nx nextScene, so scoreLabel
 
 // Phaser 3 post-pipeline (registered in the game config) that runs FRAG over a
 // whole camera. Each camera gets its own instance; `ctl` is the Glitch controller feeding it.
@@ -1375,9 +1465,9 @@ class GlitchPipeline extends Phaser.Renderer.WebGL.Pipelines.PostFXPipeline {
 
   onPreRender() {
     const c = this.ca;
-    this.set2f('res', this.renderer.width, this.renderer.height);
-    this.set1f('time', c ? c.cc : 0);
-    this.set1f('amount', c ? c.an : 0);
+    this.set2f('r', this.renderer.width, this.renderer.height);
+    this.set1f('z', c ? c.cc : 0);
+    this.set1f('a', c ? c.an : 0);
   }
 }
 
@@ -1560,7 +1650,6 @@ function controlsLegend(scene) {
     else gfx.fillStyle(0x9a9a9a).fillRect(x, 264, 3, 12).fillStyle(0xff1a1a).fillRect(x - 3, 259, 9, 8);
     label(scene, x, 292, btn, 0x8c8c8c).setDepth(21);
   });
-  label(scene, mid, 314, 'ABAJOX2: BAJAR VIGAS   PINTURA AMARILLA: SE ROMPE   BTN 4: SILENCIAR', 0x6a6a6a).setDepth(21);
 }
 
 class TitleScene extends Phaser.Scene {
@@ -1588,13 +1677,16 @@ class TitleScene extends Phaser.Scene {
 
     this.ts = image(this, mid + 3, 98, 'logo', 20).setScale(LOGO_SCALE).setTintFill(0xb00010);
     this.tt = image(this, mid, 96, 'logo', 21).setScale(LOGO_SCALE);
-    label(this, mid, 150, 'UNA TORMENTA SOBRE LOS LLANOS', 0x8c8c8c).setDepth(21);
     controlsLegend(this);
     this.pr = label(this, mid, 344, 'PULSA START', 0xffffff, 2).setDepth(21);
+    const best = label(this, mid, 370, '', 0x8c8c8c).setDepth(21);
+    loadTop().then(([t]) => t && best.active && best.setText(`MEJOR: ${t[3] || '???'} ${t[0]} - NOCHE ${t[1] + 1}`));
 
     const start = () => {
       if (this.sj) return;
       this.sj = true;
+      night = score = 0;
+      runId = Date.now();
       initAudio();
       startMusic();
       sound('glitch');
@@ -1650,10 +1742,10 @@ const RUN = 130;
 const JUMP = 360;
 const GLIDE_FALL = 36;
 const MAX_HEARTS = 3;
-const DROP_TIME = 5000; // how long a dropped tool waits on the ground
+const dropTime = () => 5000 / hard(); // how long a dropped tool waits on the ground
 const BASE_DARK = 0.8;
 const HUD_LINGER = 4000; // ms the HUD stays up after a tool change or a hit
-const BOSS_HP = 8;
+const BOSS_HP = 6; // one for every chamber of the revolver
 const NEVER = -1e9;
 // How each tool is held: [distance from the child along the aim, height, scale].
 const TOOL_HOLD = { flashlight: [8, 11, 0.6], crowbar: [7, 10, 0.8], umbrella: [6, 10, 0.7], revolver: [9, 11, 0.8] };
@@ -1698,7 +1790,8 @@ class GameScene extends Phaser.Scene {
 
     const cam = (this.cm = this.cameras.main);
     this.gl = addCameraFx(cam, 0.04);
-    this.st = new Storm(this);
+    this.st = new Storm(this, 4000 / hard(), 10000 / hard());
+    this.ns = this.time.now;
     this.st.ot = (p) => this.gl.hi(0.35 * p);
     cam.fadeIn(900, 0, 0, 0);
 
@@ -1730,7 +1823,11 @@ class GameScene extends Phaser.Scene {
       whistle(0.14, 76);
       this.hn('whistle', 'Un silbido... dicen que si suena cerca, el esta lejos.', 4500);
     });
-    later(this, 900, () => this.hn('start', 'JOYSTICK mover - BOTON 1 saltar - tu LINTERNA quema lo que acecha'));
+    later(this, 900, () => {
+      if (!night) return;
+      this.hd.bi('NOCHE ' + (night + 1));
+      later(this, 2200, () => this.hd.bi(''));
+    });
   }
 
   bm() {
@@ -1874,7 +1971,7 @@ class GameScene extends Phaser.Scene {
           this.sp(a, px, py - 10, 0, 0);
           break;
         case 'shade':
-          this.sm(this.sh, px, py, 'shade', 'eyes', 3, 10, 28, 3, 4).setOrigin(0.5, 1).dr = random() < 0.5 ? -1 : 1;
+          this.sm(this.sh, px, py, 'shade', 'eyes', 3 + min(night, 3), 10, 28, 3, 4).setOrigin(0.5, 1).dr = random() < 0.5 ? -1 : 1;
           break;
         case 'bat': {
           const m = this.sm(this.bc, px, py + 8, 'bat', 'eyes_small', 1, 12, 6, 2, 1);
@@ -2062,14 +2159,12 @@ class GameScene extends Phaser.Scene {
 
   dt(dir) {
     const tool = this.eq;
-    const text = `¡Soltaste: ${TOOL_NAMES[tool]}!`;
     this.iv.delete(tool);
     this.eq = null;
-    this.sp(tool, this.pl.x, this.pl.y - 14, -dir * between(40, 90), -220, this.time.now + DROP_TIME);
+    this.sp(tool, this.pl.x, this.pl.y - 14, -dir * between(40, 90), -220, this.time.now + dropTime());
     sound('drop');
     this.hd.ps();
-    if (this.hs.has('drop')) this.ms(text, 1500);
-    else this.hn('drop', text + ' Recogela antes de que la oscuridad se la lleve.', 3500);
+    this.ms(`¡Soltaste: ${TOOL_NAMES[tool]}!`, 1500);
   }
 
   // A dropped tool that timed out crawls back to the last lit shrine.
@@ -2273,6 +2368,8 @@ class GameScene extends Phaser.Scene {
     if (m.dy) return;
     m.dy = true;
     m.body.enable = false;
+    earn(m.tl ? 50 : 20);
+    this.hd.ps();
     this.bl(m.x, m.y - (m.tl ? 16 : 0), m.tl ? 45 : 20, m.tl ? 4 : 2);
     sound('die');
     this.jl(120, 0.006, 0.3);
@@ -2310,7 +2407,7 @@ class GameScene extends Phaser.Scene {
       if (sees) s.dr = sign(dx) || s.dr;
       // Turn at walls and ledges (unless chasing straight at the player on the same level).
       if ((s.dr > 0 ? s.body.blocked.right : s.body.blocked.left) || !this.fa(s.x + s.dr * 8, s.y + 2)) s.dr = sees ? 0 : -s.dr;
-      s.setVelocityX(s.dr * (sees ? 64 : 26) * (s.br > 0 ? 0.2 : 1));
+      s.setVelocityX(s.dr * (sees ? 64 * hard() : 26) * (s.br > 0 ? 0.2 : 1));
     }
     if (s.dr) s.setFlipX(s.dr < 0);
     s.anims.timeScale = sees ? 2.5 : 1;
@@ -2342,7 +2439,7 @@ class GameScene extends Phaser.Scene {
       b.setVelocity((b.hm.x + sin(b.t * 1.3) * 34 - b.x) * 3, (b.hm.y + sin(b.t * 2.7) * 10 - b.y) * 3);
       if (!this.dd && dist(b.x, b.y, px, py) < 150 && time > b.mu && this.lo(b.x, b.y, px, py)) {
         go('dive', 900);
-        fly(px, py, 165);
+        fly(px, py, 165 * hard());
         sound('screech');
       }
     } else if (b.md === 'dive') {
@@ -2385,6 +2482,31 @@ class GameScene extends Phaser.Scene {
     sound('death');
     this.jl(400, 0.02, 1.2);
     this.hd.bi('TE ENCONTRARON');
+    // The first night forgives; after that, being found ends the run and asks for
+    // three initials: joystick up/down changes the letter, BOTON 1 confirms it.
+    if (night) {
+      const abc = [0, 0, 0];
+      let i = 0;
+      const name = () => abc.map((c, j) => (j > i ? '-' : String.fromCharCode(65 + c))).join('');
+      const show = () => this.hd.bi(`FIN: ${score} - ${name()}`);
+      const done = () => {
+        i = 3;
+        anyPress = null;
+        saveScore(name());
+        this.nx('Title');
+      };
+      later(this, 1200, () => {
+        show();
+        anyPress = (code) => {
+          if (code === B_UP) abc[i] = (abc[i] + 1) % 26;
+          if (code === B_DOWN) abc[i] = (abc[i] + 25) % 26;
+          if (code === B_JUMP && ++i > 2) return done();
+          show();
+        };
+      });
+      later(this, 16000, () => i < 3 && done());
+      return;
+    }
     later(this, 2200, () => {
       this.hd.bi('');
       this.hr = MAX_HEARTS;
@@ -2474,7 +2596,6 @@ class GameScene extends Phaser.Scene {
 
     if (tap(B_PREV)) this.ct(-1);
     if (tap(B_NEXT)) this.ct(1);
-    if (tap(B_MUTE)) master.gain.value = master.gain.value ? 0 : 0.9;
 
     p.setFlipX(this.fc < 0);
     const running = grounded && abs(body.velocity.x) > 5;
@@ -2499,10 +2620,7 @@ class GameScene extends Phaser.Scene {
     const ty = p.y / T;
     const at = (x0, x1, y0, y1) => tx > x0 && tx < x1 && ty > y0 && ty < y1;
     if (at(27 + OX, 34 + OX, 0, H)) this.hn('veil', 'Un velo de sombra viva. Alumbralo con la linterna.');
-    if (at(84 + OX, 90 + OX, 0, 12) && !this.fn.has('umbrella')) this.hn('chasm', 'Muy lejos para saltar... si tan solo algo frenara la caida.', 4000);
     if (this.fn.has('crowbar') && at(40 + OX, 48 + OX, 20, 27) && this.cr.has(45 + OX + ',26')) this.hn('floor', 'El piso aqui esta agrietado...');
-    if (at(110 + OX, 130 + OX, 0, 9)) this.hn('bell', 'La gran campana. Hazla sonar.');
-    if (aiming) this.hn('freeaim', 'APUNTADO LIBRE - manten BOTON 2 y apunta con el joystick.', 3000);
 
     // Free-aim reticle.
     this.rt
@@ -2528,7 +2646,7 @@ class GameScene extends Phaser.Scene {
       else {
         item.setAlpha(urgent && floor(time / 80) % 2 ? 0.25 : 1);
         bars.fillStyle(0, 0.8).fillRect(item.x - 11, item.y - 16, 22, 4);
-        bars.fillStyle(urgent ? 0xff1a1a : 0xffffff, 1).fillRect(item.x - 10, item.y - 15, 20 * (left / DROP_TIME), 2);
+        bars.fillStyle(urgent ? 0xff1a1a : 0xffffff, 1).fillRect(item.x - 10, item.y - 15, 20 * (left / dropTime()), 2);
       }
     }
   }
@@ -2557,7 +2675,7 @@ class GameScene extends Phaser.Scene {
     };
 
     dark.clear();
-    dark.fill(0, max(0.32, BASE_DARK * (this.bs ? 0.6 : 1) * (1 - 0.93 * min(1, flash * 1.4))));
+    dark.fill(0, max(0.32, min(0.95, BASE_DARK + night * 0.03) * (this.bs ? 0.6 : 1) * (1 - 0.93 * min(1, flash * 1.4))));
 
     const p = this.pl;
     // The dark pool hides the scenery around the child; only a tight reveal
@@ -2724,11 +2842,11 @@ class GameScene extends Phaser.Scene {
     if (this.cu || this.dd) {
       b.setVelocityX(0);
     } else if (b.md === 'walk') {
-      b.setVelocityX(dir * (rage ? 78 : 52)).setFlipX(dir < 0);
+      b.setVelocityX(dir * (rage ? 78 : 52) * hard(0.06)).setFlipX(dir < 0);
       if (time > b.na) {
         b.md = 'tell';
         b.lu = abs(dx) < 150 && random() < 0.6;
-        b.un = time + (rage ? 420 : 600);
+        b.un = time + (rage ? 420 : 600) / hard();
         b.setVelocityX(0);
         sweep(SINE, 520, b.lu ? 1040 : 780, 0.35, 0.09);
       }
@@ -2739,7 +2857,7 @@ class GameScene extends Phaser.Scene {
         b.un = time + 520;
         b.setVelocityX(dir * 290);
       } else {
-        for (let i = 0; i < (rage ? 4 : 3); i++) {
+        for (let i = 0; i < (rage ? 4 : 3) + min(night, 3); i++) {
           this.bn
             .create(b.x, b.y - 40, 'bone')
             .setDepth(13)
@@ -2802,6 +2920,7 @@ class GameScene extends Phaser.Scene {
 
     b.dy = true;
     b.body.enable = false;
+    earn(500);
     b.anims.stop();
     this.bn.clear(true, true);
     this.bl(b.x, b.y - 28, 90, 6);
@@ -2816,6 +2935,10 @@ class GameScene extends Phaser.Scene {
   wi() {
     this.wn = true;
     this.pl.setVelocity(0, 0);
+    // Clearing the night, plus whatever is left of ten minutes.
+    earn(1000 + max(0, 600 - (this.time.now - this.ns) / 1000) * 5);
+    night++;
+    saveScore();
     sound('greatbell');
     this.jl(1200, 0.01, 1);
     this.tweens.add({ targets: this.ba, angle: { from: -14, to: 14 }, duration: 1100, yoyo: true, repeat: 2, ease: 'Sine.inOut' });
@@ -2826,10 +2949,13 @@ class GameScene extends Phaser.Scene {
       label(this, SCREEN_W / 2, SCREEN_H / 2 - 22, 'SUENA LA CAMPANA.', 0, 4),
       label(this, SCREEN_W / 2, SCREEN_H / 2 + 18, 'LA LLUVIA TE OLVIDA... POR AHORA', 0x8a0010),
     ].forEach((t, i) => fade(this, t.setScrollFactor(0).setDepth(201).setAlpha(0), 1, 1200, 4800 + i * 1200));
-    later(this, 11000, () => {
-      this.cm.fadeOut(1500, 0, 0, 0);
-      this.cm.once('camerafadeoutcomplete', () => this.scene.start('Title'));
-    });
+    later(this, 11000, () => this.nx('Game'));
+  }
+
+  // Fade out into another scene: the next night, or the title once the run is over.
+  nx(key) {
+    this.cm.fadeOut(1500, 0, 0, 0);
+    this.cm.once('camerafadeoutcomplete', () => this.scene.start(key));
   }
 
   update(time, delta) {
@@ -2920,12 +3046,13 @@ class HudScene extends Phaser.Scene {
     const hearts = (n, x) => Array.from({ length: n }, (_, i) => this.add.image(x + i * 18, 14, 'heart', 0).setScale(2));
     const slotX = (i) => SCREEN_W - 114 + i * 28;
     this.hc = hearts(MAX_HEARTS, 14);
-    this.bh = hearts(BOSS_HP, SCREEN_W / 2 - 63);
+    this.bh = hearts(BOSS_HP, SCREEN_W / 2 - 45);
     this.sy = this.add.graphics();
     this.si = TOOLS.map((t, i) => this.add.image(slotX(i), 16, 'tool_' + t));
     this.sl = TOOLS.map((_, i) => label(this, slotX(i), 16, '?', 0x8a8a8a));
     this.tb = label(this, SCREEN_W - 12, 34, '').setOrigin(1, 0);
-    this.pn = this.add.container(0, 0, [...this.hc, this.sy, ...this.si, ...this.sl, ...this.bh, this.tb]);
+    this.so = label(this, 6, 28, '').setOrigin(0);
+    this.pn = this.add.container(0, 0, [...this.hc, this.sy, ...this.si, ...this.sl, ...this.bh, this.tb, this.so]);
     this.mb = this.add.rectangle(0, SCREEN_H - 32, SCREEN_W, 20, 0, 0.8).setOrigin(0).setAlpha(0);
     this.ma = label(this, SCREEN_W / 2, SCREEN_H - 22, '').setAlpha(0);
     this.bg = label(this, SCREEN_W / 2, SCREEN_H / 2, '', 0xff1a1a, 4);
@@ -2966,6 +3093,7 @@ class HudScene extends Phaser.Scene {
       this.si[i].setVisible(known).setAlpha(g.iv.has(t) ? 1 : dropped.includes(t) && !(floor(time / 150) % 2) ? 0.65 : 0.3);
       if (shown) gr.fillStyle(0x0a0d12, 0.92).fillRect(x, 4, 24, 24).lineStyle(eq ? 2 : 1, eq ? 0xff2a2a : 0xc8d0d8, 1).strokeRect(x, 4, 24, 24);
     });
+    this.so.setText(`${score}${night ? ' - NOCHE ' + (night + 1) : ''}`);
     this.tb.setText(g.eq ? TOOL_NAMES[g.eq] : 'MANOS VACIAS').setTint(g.eq ? 0xffffff : 0xff3b3b);
 
     // Fade the panel out once the linger window lapses.
