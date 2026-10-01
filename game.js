@@ -68,8 +68,9 @@ const B_LEFT = 'P1_L';
 const B_RIGHT = 'P1_R';
 const B_UP = 'P1_U';
 const B_DOWN = 'P1_D';
-const B_JUMP = 'P1_1';
-const B_USE = 'P1_2';
+const B_JUMP = 'P1_2';
+const B_USE = 'P1_1';
+const B_DASH = 'P1_3';
 const B_PREV = 'P1_5';
 const B_NEXT = 'P1_6';
 
@@ -320,33 +321,26 @@ const SFX = {
   poke: (t) => noiseHit(t, 0.08, 0.2, 800, 2500),
   clang: (t) => {
     blip(1250, t, 0.12, 0.06, 5000, 0.001);
-    blip(1870, t, 0.08, 0.04, 5000, 0.001);
   },
   crumble: (t) => {
     noiseHit(t, 0.6, 0.6, 60, 900);
-    noiseHit(t + 0.1, 0.4, 0.3, 80, 600);
   },
   flesh: (t) => {
     noiseHit(t, 0.18, 0.4, 120, 900);
-    sweep(SAW, 160, 60, 0.15, 0.08);
   },
   hurt: (t) => {
     sweep(SQUARE, 600, 90, 0.35, 0.12);
     noiseHit(t, 0.25, 0.4, 150, 1200);
-    glitchNoise(0.25);
   },
   drop: (t) => {
     sweep(TRIANGLE, 900, 200, 0.25, 0.12);
-    blip(190, t + 0.05, 0.1, 0.05, 2000, 0.001);
   },
   pickup: (t) => arpeggio([62, 69, 74], t, 0.07, 0.15),
   newtool: (t) => {
     arpeggio([50, 57, 62, 65, 69], t, 0.09, 0.35);
-    bell(midi(62), t + 0.4, 0.05, 2.5, sfx);
   },
   checkpoint: (t) => {
     bell(midi(74), t, 0.07, 2.5, sfx);
-    bell(midi(81), t + 0.15, 0.04, 2, sfx);
   },
   lost: () => {
     sweep(SAW, 400, 40, 0.8, 0.08);
@@ -354,13 +348,11 @@ const SFX = {
   },
   screech: () => {
     sweep(SAW, 1800, 700, 0.18, 0.05);
-    sweep(SQUARE, 2400, 1200, 0.12, 0.03);
   },
   moan: () => sweep(SAW, 110, 70, 0.9, 0.06),
   die: (t) => {
     sweep(SAW, 300, 30, 0.6, 0.12);
     noiseHit(t, 0.4, 0.5, 80, 1500);
-    glitchNoise(0.3);
   },
   burn: (t) => noiseHit(t, 0.1, 0.06, 2000, 6000),
   veil: () => {
@@ -1030,16 +1022,6 @@ function makeBackdrops() {
     g.addColorStop(1, '#3c2b1c');
     ink(g);
     pen.fillRect(0, 0, 640, 480);
-    const r = rng(21);
-    for (let i = 0; i < 56; i++) {
-      const x = r() * 700 - 30;
-      const y = r() * 260;
-      const w = 60 + r() * 140;
-      ink(`rgba(${r() > 0.5 ? '34,30,30' : '16,14,18'},0.5)`);
-      pen.beginPath();
-      pen.ellipse(x, y, w / 2, 8 + r() * 14, 0, 0, PI * 2);
-      pen.fill();
-    }
   });
 
   // Far savanna: flat horizon, a ragged treeline and one church ruin.
@@ -1358,7 +1340,7 @@ function buildWorld() {
 }
 
 // Digital-glitch camera filter: RGB split, tear bands, datamosh blocks,
-// pixel-sort streaks, scanline corruption and film grain.
+// scanline corruption and film grain.
 // `amount` 0..1 drives how broken the picture gets.
 // Kept flush left and tight: every byte in here counts against the size limit.
 // The shader is shipped minified below; this is the same program, readable
@@ -1373,9 +1355,6 @@ function buildWorld() {
 // vec3 p = fract(vec3(co.xyx) * .1031);
 // p += dot(p, p.yzx + 33.33);
 // return fract((p.x + p.y) * p.z);
-// }
-// float luma(vec3 c) {
-// return dot(c, vec3(.299, .587, .114));
 // }
 // void main() {
 // vec2 uv = outTexCoord;
@@ -1394,15 +1373,6 @@ function buildWorld() {
 // vec4 col = texture2D(uMainSampler, uv);
 // col.r = texture2D(uMainSampler, uv + dir).r;
 // col.b = texture2D(uMainSampler, uv - dir).b;
-// if (step(1. - I * .3, rand(vec2(floor(uv.x * res.x / 2.) * .13, band + t))) > .5) {
-// vec4 m = col;
-// for (int i = 1; i < 12; i++) {
-// vec4 s = texture2D(uMainSampler, uv + vec2(0., float(i) * 3. / res.y));
-// if (luma(s.rgb) > luma(m.rgb)) { m = s; }
-// }
-// col = mix(col, m, .6);
-// }
-// col.rgb *= .86 + .14 * sin(outTexCoord.y * res.y * 3.14159);
 // float cl = step(1. - max(0., I - .12) * .03, rand(vec2(line * .37 + t * 13.1, t * 7.3 + 5.)));
 // col.rgb = mix(col.rgb, vec3(rand(vec2(line, t))), cl * .7);
 // col.rgb += (rand(outTexCoord * res + t * 17.) - .5) * (.05 + I * .1);
@@ -1413,7 +1383,7 @@ precision highp float;
 uniform sampler2D uMainSampler;
 #define T(x) texture2D(uMainSampler,x)
 #define V vec2
-uniform V r;uniform float z,a;varying V outTexCoord;float R(V c){vec3 p=fract(vec3(c.xyx)*.1031);p+=dot(p,p.yzx+33.33);return fract((p.x+p.y)*p.z);}float L(vec3 c){return dot(c,vec3(.299,.587,.114));}void main(){V u=outTexCoord;float t=mod(floor(z*14.),251.);float b=floor(u.y*28.);float e=step(1.-a*.4,R(V(b,t)))*(R(V(b+7.,t))-.5)*.16*a;float l=floor(u.y*r.y);u.x+=e+step(1.-a*.05,R(V(l*.37+t*3.1,t+2.)))*(R(V(l*1.7,t))-.5)*.06;V k=floor(u*V(20.,12.));if(R(k+V(t*.37,t*.11))>1.-a*.14){u+=(V(R(k+1.3),R(k+2.1))-.5)*.08*(.5+a);}float h=.0012+a*.014;V d=V(h,h*.35*sin(z*9.));vec4 o=T(u);o.r=T(u+d).r;o.b=T(u-d).b;if(step(1.-a*.3,R(V(floor(u.x*r.x/2.)*.13,b+t)))>.5){vec4 m=o;for(int i=1;i<12;i++){vec4 q=T(u+V(0.,float(i)*3./r.y));if(L(q.rgb)>L(m.rgb)){m=q;}}o=mix(o,m,.6);}o.rgb*=.86+.14*sin(outTexCoord.y*r.y*3.14159);float g=step(1.-max(0.,a-.12)*.03,R(V(l*.37+t*13.1,t*7.3+5.)));o.rgb=mix(o.rgb,vec3(R(V(l,t))),g*.7);o.rgb+=(R(outTexCoord*r+t*17.)-.5)*(.05+a*.1);gl_FragColor=o;}
+uniform V r;uniform float z,a;varying V outTexCoord;float R(V c){vec3 p=fract(vec3(c.xyx)*.1031);p+=dot(p,p.yzx+33.33);return fract((p.x+p.y)*p.z);}void main(){V u=outTexCoord;float t=mod(floor(z*14.),251.);float b=floor(u.y*28.);float e=step(1.-a*.4,R(V(b,t)))*(R(V(b+7.,t))-.5)*.16*a;float l=floor(u.y*r.y);u.x+=e+step(1.-a*.05,R(V(l*.37+t*3.1,t+2.)))*(R(V(l*1.7,t))-.5)*.06;V k=floor(u*V(20.,12.));if(R(k+V(t*.37,t*.11))>1.-a*.14){u+=(V(R(k+1.3),R(k+2.1))-.5)*.08*(.5+a);}float h=.0012+a*.014;V d=V(h,h*.35*sin(z*9.));vec4 o=T(u);o.r=T(u+d).r;o.b=T(u-d).b;float g=step(1.-max(0.,a-.12)*.03,R(V(l*.37+t*13.1,t*7.3+5.)));o.rgb=mix(o.rgb,vec3(R(V(l,t))),g*.7);o.rgb+=(R(outTexCoord*r+t*17.)-.5)*(.05+a*.1);gl_FragColor=o;}
 `;
 
 // Property and method names are two letters to fit the size limit (the minifier
@@ -1617,7 +1587,7 @@ function controlsLegend(scene) {
     ['MOVER', 'JOYSTICK', (x, y) => scene.add.sprite(x, y, 'child').setScale(2).setDepth(21).play('child-run')],
     [
       'USAR',
-      'BTN 2',
+      'BTN 1',
       (x, y) => {
         image(scene, x + 10, y, 'cone', 20, 0, 0.5).setScale(0.2).setAlpha(0.5);
         img(x - 12, y, 'child', 0);
@@ -1625,24 +1595,25 @@ function controlsLegend(scene) {
       },
     ],
     [
-      'SALTAR / PLANEAR',
-      'BTN 1',
+      'SALTAR',
+      'BTN 2',
       (x, y) => {
         img(x, y + 4, 'child', 4);
         img(x, y - 30, 'umbrella_open');
       },
     ],
-    ['CAMBIAR', 'BTN 5 / 6', (x, y) => TOOLS.slice(0, 3).forEach((t, i) => img(x + (i - 1) * 30, y + 6, 'tool_' + t))],
+    ['CAMBIAR', 'BTN 5/6', (x, y) => TOOLS.slice(0, 3).forEach((t, i) => img(x + (i - 1) * 30, y + 6, 'tool_' + t))],
     [
       'APUNTAR',
-      'BTN 2 Y JOYSTICK',
+      'BTN 1 Y MOVER',
       (x, y) => {
         img(x - 12, y, 'child', 0);
         img(x + 14, y - 22, 'reticle').setRotation(-PI / 4);
       },
     ],
+    ['DASH', 'BTN 3', (x, y) => img(x, y, 'child', 4)],
   ].forEach(([act, btn, icon], i) => {
-    const x = mid + (i - 2) * 124;
+    const x = mid + (i - 2.5) * 104;
     icon(x, 214);
     label(scene, x, 250, act).setDepth(21);
     gfx.fillStyle(0x4a4a4a).fillRect(x - 13, 276, 26, 6);
@@ -1722,12 +1693,14 @@ class PauseScene extends Phaser.Scene {
   }
 
   create() {
+    this.gl = addCameraFx(this.cameras.main, 0.08);
     this.add.rectangle(0, 0, SCREEN_W, SCREEN_H, 0x000000, 0.85).setOrigin(0).setScrollFactor(0);
     controlsLegend(this);
     this.pr = label(this, SCREEN_W / 2, 348, 'PAUSA', 0xffffff, 3).setDepth(21);
   }
 
-  update(time) {
+  update(time, delta) {
+    this.gl.tk(delta / 1000);
     this.pr.setAlpha(floor(time / 500) % 2 ? 0.35 : 1);
     if (tap('START1') || tap('START2')) {
       clearTaps();
@@ -2012,7 +1985,6 @@ class GameScene extends Phaser.Scene {
     this.al(shrine.x, shrine.y - 16, 80);
     if (!silent) {
       sound('checkpoint');
-      this.ms('Las velas te recuerdan.');
     }
   }
 
@@ -2148,12 +2120,11 @@ class GameScene extends Phaser.Scene {
     if (first) {
       sound('newtool');
       this.gl.hi(0.4);
-      if (tool === 'crowbar') this.ms('PATA DE CABRA - pulsa BOTON 2 para golpear. La piedra agrietada cede.', 5000);
-      if (tool === 'umbrella') this.ms('PARAGUAS - manten BOTON 1 al caer para planear.', 5000);
+      if (tool === 'crowbar') this.ms('PATA DE CABRA - BOTON 1 golpea.', 5000);
+      if (tool === 'umbrella') this.ms('PARAGUAS - manten BOTON 2 al caer para planear.', 5000);
       if (tool === 'revolver') this.hr = MAX_HEARTS;
     } else {
       sound('pickup');
-      this.ms(`Recuperaste: ${TOOL_NAMES[tool]}.`, 1800);
     }
   }
 
@@ -2174,7 +2145,7 @@ class GameScene extends Phaser.Scene {
     this.gl.hi(0.3);
     item.setPosition(this.ch.x + 16, this.ch.y - 10).setVelocity(0, 0).setAlpha(1);
     item.ex = null;
-    this.ms(`La oscuridad se llevo: ${TOOL_NAMES[item.tc]}... te espera junto a las velas.`, 3500);
+    this.ms(`${TOOL_NAMES[item.tc]} te espera junto a las velas.`, 3500);
   }
 
   ul(dt, time) {
@@ -2335,7 +2306,7 @@ class GameScene extends Phaser.Scene {
       if (random() < 0.2) this.gf.emitParticleAt(v.rc.centerX, between(v.rc.top, v.rc.bottom), 1);
       if (random() < 0.05) sound('burn');
       if (v.sn <= 0) this.dv(v);
-      else this.hn('veil-focus', 'Retrocede ante la luz... manten BOTON 2 para enfocar el haz.');
+      else this.hn('vf', 'Manten BOTON 1 para enfocar.');
     }
   }
 
@@ -2500,7 +2471,7 @@ class GameScene extends Phaser.Scene {
         anyPress = (code) => {
           if (code === B_UP) abc[i] = (abc[i] + 1) % 26;
           if (code === B_DOWN) abc[i] = (abc[i] + 25) % 26;
-          if (code === B_JUMP && ++i > 2) return done();
+          if (code === B_USE && ++i > 2) return done();
           show();
         };
       });
@@ -2539,7 +2510,7 @@ class GameScene extends Phaser.Scene {
 
     const grounded = body.blocked.down;
 
-    // Free aim / focus: hold BUTTON 2 and steer with the stick. The stick drives the
+    // Free aim / focus: hold BUTTON 1 and steer with the stick. The stick drives the
     // reticle instead of movement, so the child plants their feet while aiming.
     const hx = (down(B_RIGHT) ? 1 : 0) - (down(B_LEFT) ? 1 : 0);
     const vy = (down(B_DOWN) ? 1 : 0) - (down(B_UP) ? 1 : 0);
@@ -2564,6 +2535,13 @@ class GameScene extends Phaser.Scene {
     }
     this.wg = grounded;
     this.lt = body.velocity.y;
+
+    // Dash: a short burst the way the child faces. Rides the stun window, which
+    // already keeps the stick from overriding the velocity, plus a short cooldown.
+    if (tap(B_DASH) && !aiming && time > this.su + 400) {
+      this.su = time + 160;
+      p.setVelocityX(this.fc * 420);
+    }
 
     if (time > this.su) {
       const dir = aiming ? 0 : hx;
@@ -2705,12 +2683,6 @@ class GameScene extends Phaser.Scene {
         .setScale(scaleX, scaleY)
         .setRotation(c.angle)
         .setAlpha((this.fs ? 0.2 : 0.12) * this.fl);
-    }
-
-    // Deep in the cave the roof seals the world above into pure darkness.
-    if (p.x > (34 + OX) * T && p.x < (89 + OX) * T && p.y > CAVE_Y * T) {
-      const ceil = (CAVE_Y - 1) * T - sy;
-      if (ceil > 0) dark.fill(0, 1, 0, 0, SCREEN_W, ceil);
     }
   }
 
@@ -2899,7 +2871,7 @@ class GameScene extends Phaser.Scene {
     later(this, 2700, () => {
       this.cu = false;
       this.iu = this.time.now + 2500;
-      this.ms('¡Un revolver! Agarralo y dispara con BOTON 2.', 5000);
+      this.ms('¡Dispara con BOTON 1!', 5000);
     });
     fade(this, [who, ...say], 0, 1000, 5000, () => {
       this.lh.splice(this.lh.indexOf(lamp), 1);
