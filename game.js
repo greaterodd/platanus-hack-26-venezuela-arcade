@@ -1793,10 +1793,10 @@ const PROPS = {
 };
 
 const VROSTER = [
-  { k: 'child', n: 'EL CHAMO', tex: 'child', anim: 'child', bw: 10, bh: 20, ox: 3, oy: 4, sp: 130, jp: 360 },
-  { k: 'silbon', n: 'EL SILBON', tex: 'silbon', anim: 'silbon', bw: 10, bh: 42, ox: 7, oy: 14, sp: 118, jp: 340 },
-  { k: 'shade', n: 'EL ESPANTO', tex: 'shade', anim: 'shade', bw: 10, bh: 28, ox: 3, oy: 4, sp: 112, jp: 350 },
-  { k: 'campesino', n: 'EL CAMPESINO', tex: 'campesino', anim: null, bw: 10, bh: 22, ox: 3, oy: 4, sp: 120, jp: 340 },
+  { k: 'child', n: 'EL CHAMO', tex: 'child', anim: 'child', bw: 10, bh: 20, ox: 3, oy: 4, sp: 130, jp: 375 },
+  { k: 'silbon', n: 'EL SILBON', tex: 'silbon', anim: 'silbon', bw: 10, bh: 42, ox: 7, oy: 14, sp: 118, jp: 385 },
+  { k: 'shade', n: 'EL ESPANTO', tex: 'shade', anim: 'shade', bw: 10, bh: 28, ox: 3, oy: 4, sp: 112, jp: 375 },
+  { k: 'campesino', n: 'EL CAMPESINO', tex: 'campesino', anim: null, bw: 10, bh: 22, ox: 3, oy: 4, sp: 120, jp: 370 },
 ];
 const VANIM = { child: ['child-idle', 'child-run', 'child-jump'], silbon: ['silbon-walk', 'silbon-walk', 'silbon-walk'], shade: ['shade-walk', 'shade-walk', 'shade-walk'], campesino: null };
 
@@ -1810,7 +1810,7 @@ function buildVersusArena(scene) {
   fill(0, 28, AW - 1, 29, SOLID);
   fill(0, 0, 0, AH - 1, SOLID);
   fill(AW - 1, 0, AW - 1, AH - 1, SOLID);
-  fill(16, 23, 23, 23, BEAM);
+  fill(16, 24, 23, 24, BEAM);
   fill(5, 20, 13, 20, BEAM);
   fill(26, 20, 34, 20, BEAM);
   fill(8, 16, 11, 16, BEAM);
@@ -3205,16 +3205,12 @@ class VersusScene extends Phaser.Scene {
 
   create() {
     const c = (this.c = this.cameras.main);
-    this.g = addCameraFx(c, 0.05);
-    this.r = new Storm(this, 3500, 8000);
-    this.r.ot = (p) => this.g.hi(0.4 * p);
     this.A = buildVersusArena(this);
     this.physics.world.setBounds(0, 0, SCREEN_W, SCREEN_H);
     c.setBounds(0, 0, SCREEN_W, SCREEN_H);
     c.fadeIn(600, 0, 0, 0);
     this.T = this.physics.add.group();
     this.physics.add.collider(this.T, this.A.layer);
-    this.B = this.add.particles(0, 0, 'blood', { emitting: false, lifespan: range(400, 900), speed: range(50, 220), angle: range(200, 340), gravityY: 700, scale: ramp(1, 0.4) }).setDepth(20);
     this.L = [];
     this.U = [];
     this.H = null;
@@ -3235,23 +3231,23 @@ class VersusScene extends Phaser.Scene {
     this.u();
     this.M = 0;
     this.I = 0;
-    this.U = [
-      label(this, 320, 140, 'VERSUS', 0xff1a1a, 4).setDepth(20),
-      label(this, 320, 230, '1 JUGADOR VS PC', 0xffffff, 2).setDepth(20),
-      label(this, 320, 270, '2 JUGADORES', 0x8c8c8c, 2).setDepth(20),
-      label(this, 320, 350, 'ARRIBA/ABAJO MOVER - BTN 1 ELEGIR', 0x8c8c8c).setDepth(20),
-    ];
-    this.l = [this.U[1], this.U[2]];
+    this.U = [this.add.rectangle(320, 280, 440, 190, 0x0e1320, 0.82).setStrokeStyle(1, 0x2b3648).setDepth(1), label(this, 320, 150, 'VERSUS', 0xff1a1a, 4).setDepth(20), label(this, 320, 240, '1 JUGADOR VS PC', 0xffffff, 2).setDepth(20), label(this, 320, 280, '2 JUGADORES', 0x8c8c8c, 2).setDepth(20), label(this, 320, 320, 'VOLVER AL INICIO', 0x8c8c8c, 2).setDepth(20)];
+    this.l = [this.U[2], this.U[3], this.U[4]];
   }
 
   mu() {
-    if (tap('P1_U') || tap('P2_U') || tap('P1_D') || tap('P2_D')) {
-      this.I ^= 1;
+    if (tap('P1_U') || tap('P2_U')) {
+      this.I = (this.I + 2) % 3;
+      sound('poke');
+    }
+    if (tap('P1_D') || tap('P2_D')) {
+      this.I = (this.I + 1) % 3;
       sound('poke');
     }
     if (tap('P1_1') || tap('START1')) {
-      this.P = !this.I;
       clearTaps();
+      if (this.I === 2) return this.scene.start('Title');
+      this.P = this.I === 0;
       sound('newtool');
       return this.cs();
     }
@@ -3262,74 +3258,61 @@ class VersusScene extends Phaser.Scene {
     this.cf();
     this.u();
     this.M = 1;
-    this.S = [{ i: 0, l: false }, { i: 1, l: false }];
-    if (this.P) {
-      this.S[1].i = between(0, 3);
-      this.S[1].l = true;
-    }
+    this.a = 0;
+    this.b = 0;
+    this.al = false;
+    this.bl = !!this.P;
+    if (this.P) this.b = between(0, 3);
     this.G = VROSTER.map((r, i) => {
       const x = 320 + ((i % 2) - 0.5) * 122;
       const y = 216 + (floor(i / 2) - 0.5) * 98;
-      return { x, y, s: image(this, x, y - 10, r.tex, 5, 0.5, 1, 0).setScale(VSCALE(r.k)), n: label(this, x, y + 40, r.n, 0xc8c8c8) };
+      const s = image(this, x, y, r.tex, 5, 0.5, 0.5, 0);
+      s.setScale(64 / s.height);
+      return { x, y, s, n: label(this, x, y + 44, r.n, 0xc8c8c8) };
     });
-    const pn = (x, y, w, h) => this.add.rectangle(x, y, w, h, 0x0e1320, 0.82).setStrokeStyle(1, 0x2b3648).setDepth(1);
-    this.ma = this.add.rectangle(0, 0, 86, 86, 0, 0).setStrokeStyle(2, 0xff2a2a).setDepth(6);
-    this.mb = this.add.rectangle(0, 0, 86, 86, 0, 0).setStrokeStyle(2, 0xffffff).setDepth(6);
-    this.ga = image(this, 92, 258, VROSTER[this.S[0].i].tex, 5, 0.5, 1, 0).setScale(VSCALE(VROSTER[this.S[0].i].k) * 1.5);
-    this.gb = image(this, SCREEN_W - 92, 258, VROSTER[this.S[1].i].tex, 5, 0.5, 1, 0).setScale(VSCALE(VROSTER[this.S[1].i].k) * 1.5);
+    this.ma = this.add.rectangle(0, 0, 78, 78, 0, 0).setStrokeStyle(2, 0xff2a2a).setDepth(6);
+    this.mb = this.add.rectangle(0, 0, 78, 78, 0, 0).setStrokeStyle(2, 0xffffff).setDepth(6);
+    this.ga = image(this, 92, 250, VROSTER[this.a].tex, 5, 0.5, 0.5, 0);
+    this.ga.setScale(110 / this.ga.height);
+    this.gb = image(this, SCREEN_W - 92, 250, VROSTER[this.b].tex, 5, 0.5, 0.5, 0);
+    this.gb.setScale(110 / this.gb.height);
     this.U = [
-      pn(320, 216, 300, 250),
-      pn(92, 255, 150, 240),
-      pn(SCREEN_W - 92, 255, 150, 240),
+      this.add.rectangle(320, 216, 300, 260, 0x0e1320, 0.82).setStrokeStyle(1, 0x2b3648).setDepth(1),
+      this.add.rectangle(92, 250, 150, 220, 0x0e1320, 0.82).setStrokeStyle(1, 0x2b3648).setDepth(1),
+      this.add.rectangle(SCREEN_W - 92, 250, 150, 220, 0x0e1320, 0.82).setStrokeStyle(1, 0x2b3648).setDepth(1),
       ...this.G.flatMap((g) => [g.s, g.n]),
       this.ma,
       this.mb,
       this.ga,
       this.gb,
-      label(this, 92, 342, 'JUGADOR 1', 0xff2a2a),
-      label(this, SCREEN_W - 92, 342, this.P ? 'PC' : 'JUGADOR 2', 0xffffff),
-      label(this, 320, 368, 'MUEVE Y BTN 1 PARA ELEGIR', 0x8c8c8c),
+      label(this, 92, 342, 'JUGADOR 1', 0xff2a2a, 2),
+      label(this, SCREEN_W - 92, 342, this.P ? 'PC' : 'JUGADOR 2', 0xffffff, 2),
     ];
   }
 
-  nv(s, dx, dy) {
-    const i = s.i;
-    const j = max(0, min(1, floor(i / 2) + dy)) * 2 + max(0, min(1, (i % 2) + dx));
-    if (j !== i) {
-      s.i = j;
-      sound('poke');
-    }
-  }
-
   cu() {
-    const a = this.S[0];
-    const b = this.S[1];
-    if (!a.l) {
-      if (tap('P1_L')) this.nv(a, -1, 0);
-      if (tap('P1_R')) this.nv(a, 1, 0);
-      if (tap('P1_U')) this.nv(a, 0, -1);
-      if (tap('P1_D')) this.nv(a, 0, 1);
+    if (tap('P1_5')) return this.m();
+    if (!this.al) {
+      if (tap('P1_R')) this.a = (this.a + 1) % 4;
+      if (tap('P1_L')) this.a = (this.a + 3) % 4;
       if (tap('P1_1') || tap('START1')) {
-        a.l = true;
+        this.al = true;
         sound('checkpoint');
       }
     }
-    if (!this.P && !b.l) {
-      if (tap('P2_L')) this.nv(b, -1, 0);
-      if (tap('P2_R')) this.nv(b, 1, 0);
-      if (tap('P2_U')) this.nv(b, 0, -1);
-      if (tap('P2_D')) this.nv(b, 0, 1);
+    if (!this.P && !this.bl) {
+      if (tap('P2_R')) this.b = (this.b + 1) % 4;
+      if (tap('P2_L')) this.b = (this.b + 3) % 4;
       if (tap('P2_1') || tap('START2')) {
-        b.l = true;
+        this.bl = true;
         sound('checkpoint');
       }
     }
-    this.ma.setPosition(this.G[a.i].x, this.G[a.i].y - 10).setAlpha(a.l ? 1 : 0.55);
-    this.mb.setPosition(this.G[b.i].x, this.G[b.i].y - 10).setAlpha(b.l ? 1 : 0.55);
-    this.ga.setTexture(VROSTER[a.i].tex).setScale(VSCALE(VROSTER[a.i].k) * 1.5);
-    this.gb.setTexture(VROSTER[b.i].tex).setScale(VSCALE(VROSTER[b.i].k) * 1.5);
-    if (a.l && b.l) {
-      this.C = [a.i, b.i];
+    this.ma.setPosition(this.G[this.a].x, this.G[this.a].y).setAlpha(this.al ? 1 : 0.55);
+    this.mb.setPosition(this.G[this.b].x, this.G[this.b].y).setAlpha(this.bl ? 1 : 0.55);
+    this.ga.setTexture(VROSTER[this.a].tex).setScale(110 / this.ga.height);
+    this.gb.setTexture(VROSTER[this.b].tex).setScale(110 / this.gb.height);
+    if (this.al && this.bl) {
       clearTaps();
       this.sf();
     }
@@ -3353,10 +3336,14 @@ class VersusScene extends Phaser.Scene {
     f.aj = 0;
     f.ac = 0;
     f.stun = 0;
+    f.su = 0;
     f.iu = 0;
     f.jc = 0;
     f.tool = null;
+    f.iv = [];
     f.onGround = false;
+    f.hl = image(this, x, 27 * T, 'tool_flashlight', 11).setVisible(false);
+    if (r.k === 'silbon' || r.k === 'shade') f.ey = image(this, x, 27 * T, 'eyes', 60);
     this.L.push(this.physics.add.collider(f, this.A.layer));
     this.L.push(this.physics.add.overlap(f, this.T, (_, it) => this.pk(f, it)));
     return f;
@@ -3365,17 +3352,17 @@ class VersusScene extends Phaser.Scene {
   cf() {
     this.L.forEach((c) => c.destroy());
     this.L = [];
-    for (const f of [this.a, this.b]) if (f) f.destroy();
-    this.a = this.b = null;
+    for (const f of [this.p1, this.p2])
+      if (f) {
+        if (f.hl) f.hl.destroy();
+        if (f.ey) f.ey.destroy();
+        f.destroy();
+      }
+    this.p1 = this.p2 = null;
     [...this.T.getChildren()].forEach((it) => it.destroy());
     if (this.H) {
       this.H.forEach((o) => o.destroy());
       this.H = null;
-    }
-    if (this.wa) {
-      this.wa.destroy();
-      this.wb.destroy();
-      this.wa = this.wb = null;
     }
   }
 
@@ -3384,64 +3371,52 @@ class VersusScene extends Phaser.Scene {
     this.u();
     this.M = 2;
     this.O = null;
-    this.a = this.mk(1, this.C[0], 90);
-    this.b = this.mk(2, this.C[1], SCREEN_W - 90);
+    this.p1 = this.mk(1, this.a, 90);
+    this.p2 = this.mk(2, this.b, SCREEN_W - 90);
     this.H = [];
     for (let i = 0; i < 3; i++) {
       this.H.push(image(this, 16 + i * 18, 16, 'heart', 40).setScale(2));
       this.H.push(image(this, SCREEN_W - 16 - i * 18, 16, 'heart', 40).setScale(2));
     }
-    this.wa = label(this, 12, 32, '', 0xffffff).setOrigin(0, 0).setDepth(40);
-    this.wb = label(this, SCREEN_W - 12, 32, '', 0xffffff).setOrigin(1, 0).setDepth(40);
-    this.hd();
     this.n = this.time.now + 2000;
     clearTaps();
   }
 
   st(tc, x, y, vx, vy) {
     const p = this.T.create(x, y, 'tool_' + tc).setDepth(14).setBounce(0.3).setScale(1.7).setVelocity(vx || 0, vy || 0);
-    p.body.setSize(16, 16);
+    p.body.setSize(16, 16).setGravityY(-760).setMaxVelocityY(90);
     p.tc = tc;
     p.gw = image(this, x, y, 'light', 45).setBlendMode(1).setScale(0.8).setAlpha(0.22).setTint(0xffe066);
-    p.once('destroy', () => p.gw && p.gw.destroy());
+    if (p.preFX) p.preFX.addGlow(0xffe066, 3, 0, false, 0.08, 18);
+    p.once('destroy', () => p.gw.destroy());
   }
 
   sp(t) {
     if (this.O || this.T.getLength() >= 3 || t < this.n) return;
-    this.n = t + between(4000, 8000);
+    this.n = t + between(7000, 12000);
     this.st(TOOLS[between(0, 3)], between(40, SCREEN_W - 40), -12, 0, 0);
-  }
-
-  nt(f) {
-    let b = null;
-    let d = Infinity;
-    for (const it of this.T.getChildren()) {
-      const q = hypot(it.x - f.x, it.y - f.y);
-      if (q < d) {
-        d = q;
-        b = it;
-      }
-    }
-    return b;
   }
 
   pk(f, it) {
     if (!it.active || this.O) return;
+    if (!f.iv.includes(it.tc)) f.iv.push(it.tc);
     f.tool = it.tc;
     sound('pickup');
     it.destroy();
-    this.hd();
+  }
+
+  cy(f, d) {
+    if (!f.iv.length) return;
+    const i = f.iv.indexOf(f.tool);
+    f.tool = f.iv[(i + d + f.iv.length) % f.iv.length];
+    sound('poke');
   }
 
   dr(f, dir) {
     const t = f.tool;
-    f.tool = null;
+    f.iv = f.iv.filter((x) => x !== t);
+    f.tool = f.iv[0] || null;
     this.st(t, f.x, f.y - 16, -dir * between(40, 90), -200);
-    this.hd();
-  }
-
-  bl(x, y, n) {
-    this.B.emitParticleAt(x, y, n);
   }
 
   at(f, foe, t) {
@@ -3451,20 +3426,14 @@ class VersusScene extends Phaser.Scene {
     if (w === 'revolver') {
       sound('shot');
       this.c.shake(60, 0.005);
-      this.g.hi(0.2);
       const x0 = f.x + dir * 14;
       const y0 = f.y - 12;
-      const ln = new Phaser.Geom.Line(x0, y0, x0 + dir * 300, y0);
-      const tr = this.add.graphics().setDepth(30).lineStyle(1, 0xffffff, 0.9).strokeLineShape(ln);
-      later(this, 50, () => tr.destroy());
-      if (foe && !this.O && Phaser.Geom.Intersects.LineToRectangle(ln, foe.getBounds())) this.hi(f, foe, dir);
+      if (foe && !this.O && Phaser.Geom.Intersects.LineToRectangle(new Phaser.Geom.Line(x0, y0, x0 + dir * 300, y0), foe.getBounds())) this.hi(f, foe, dir);
       return;
     }
     sound(w === 'crowbar' ? 'swing' : 'poke');
     const r = w === 'crowbar' ? 40 : w === 'umbrella' ? 36 : 30;
     const box = new Phaser.Geom.Rectangle(dir > 0 ? f.x + 4 : f.x - 4 - r, f.y - 24, r, 24);
-    const sw = this.add.rectangle(box.centerX, box.centerY, r, 4, 0xffffff, 0.55).setDepth(30).setRotation(dir > 0 ? 0.25 : -0.25);
-    later(this, 90, () => sw.destroy());
     if (foe && !this.O && Phaser.Geom.Intersects.RectangleToRectangle(box, foe.getBounds())) this.hi(f, foe, dir);
   }
 
@@ -3474,37 +3443,19 @@ class VersusScene extends Phaser.Scene {
     v.iu = t + 1200;
     v.stun = t + 320;
     v.setVelocity((dir || a.fc) * 190, -220);
-    this.bl(v.x, v.y - 14, 14);
     sound('hurt');
     this.c.shake(140, 0.012);
-    this.g.hi(0.5);
     if (v.tool) this.dr(v, dir || a.fc);
     if (--v.hp <= 0) this.ko(v, a);
     else this.hd();
-  }
-
-  lo(f, foe) {
-    if (this.O) return;
-    f.hp--;
-    sound('hurt');
-    this.c.shake(140, 0.012);
-    this.g.hi(0.5);
-    if (f.hp <= 0) this.ko(f, foe);
-    else {
-      f.setPosition(f.side === 1 ? 90 : SCREEN_W - 90, 24 * T).setVelocity(0, 0);
-      f.iu = this.time.now + 1200;
-      this.hd();
-    }
   }
 
   ko(v, a) {
     if (v.dy) return;
     v.dy = true;
     v.body.enable = false;
-    this.bl(v.x, v.y - 14, 40);
     sound('die');
     this.c.shake(300, 0.02);
-    this.g.hi(1);
     fade(this, [v], 0, 700);
     this.wn(a);
   }
@@ -3513,7 +3464,6 @@ class VersusScene extends Phaser.Scene {
     const b = f.body;
     const g = b.blocked.down;
     f.onGround = g;
-    if (f.y > SCREEN_H + 30) return this.lo(f, foe);
     if (this.O) return f.setVelocityX(0);
     let ix = 0;
     let ij = false;
@@ -3523,8 +3473,15 @@ class VersusScene extends Phaser.Scene {
       ix = (down(p ? 'P1_R' : 'P2_R') ? 1 : 0) - (down(p ? 'P1_L' : 'P2_L') ? 1 : 0);
       ij = tap(p ? 'P1_2' : 'P2_2');
       ia = tap(p ? 'P1_1' : 'P2_1');
+      if (tap(p ? 'P1_3' : 'P2_3') && t > f.su + 400) {
+        f.su = t + 160;
+        f.stun = t + 160;
+        f.setVelocityX(f.fc * 420);
+      }
+      if (tap(p ? 'P1_5' : 'P2_5')) this.cy(f, -1);
+      if (tap(p ? 'P1_6' : 'P2_6')) this.cy(f, 1);
     } else {
-      versusAI(f, foe, dt, t, this.nt(f));
+      versusAI(f, foe, dt, t);
       ix = f.aiX;
       ij = f.aiJ;
       ia = f.aiA;
@@ -3553,52 +3510,50 @@ class VersusScene extends Phaser.Scene {
     }
     f.setFlipX(f.fc < 0);
     f.setAlpha(t < f.iu && floor(t / 70) % 2 ? 0.35 : 1);
+    f.hl.setVisible(!!f.tool).setTexture(f.tool ? 'tool_' + f.tool : 'tool_flashlight').setPosition(f.x + f.fc * 8, f.y - 12).setFlipX(f.fc < 0);
+    if (f.ey) f.ey.setPosition(f.x + (f.fc < 0 ? -2 : 2), f.y - (f.cfg.k === 'silbon' ? 42 : 27)).setFlipX(f.fc < 0);
   }
 
   vf(t, dt) {
     this.sp(t);
-    this.uf(this.a, this.b, dt, t);
-    this.uf(this.b, this.a, dt, t);
-    for (const it of this.T.getChildren()) if (it.gw) it.gw.setPosition(it.x, it.y).setScale(0.78 + 0.05 * sin(t / 240 + it.y * 0.11));
+    this.uf(this.p1, this.p2, dt, t);
+    this.uf(this.p2, this.p1, dt, t);
+    for (const it of this.T.getChildren()) if (it.gw) it.gw.setPosition(it.x, it.y).setScale(0.78 + 0.05 * sin(t / 240 + it.y * 0.11)).setAlpha(0.2 + 0.08 * sin(t / 190 + it.x * 0.13));
     this.hd();
   }
 
   hd() {
-    if (!this.H || !this.a) return;
+    if (!this.H || !this.p1) return;
     for (let i = 0; i < 3; i++) {
-      this.H[i * 2].setFrame(i < this.a.hp ? 0 : 1);
-      this.H[i * 2 + 1].setFrame(i < this.b.hp ? 0 : 1);
+      this.H[i * 2].setFrame(i < this.p1.hp ? 0 : 1);
+      this.H[i * 2 + 1].setFrame(i < this.p2.hp ? 0 : 1);
     }
-    this.wa.setText(this.a.tool ? TOOL_NAMES[this.a.tool] : 'MANOS VACIAS');
-    this.wb.setText(this.b.tool ? TOOL_NAMES[this.b.tool] : 'MANOS VACIAS');
   }
 
   wn(a) {
     this.O = a;
     this.M = 3;
     this.I = 0;
-    const w = a === this.a;
-    const who = w ? 'JUGADOR 1' : this.P ? 'LA PC' : 'JUGADOR 2';
+    const who = a === this.p1 ? 'JUGADOR 1' : this.P ? 'LA PC' : 'JUGADOR 2';
     this.u();
-    this.U = [
-      label(this, 320, 170, '¡GANO ' + who + '!', 0xff1a1a, 3).setDepth(20),
-      label(this, 320, 210, VROSTER[w ? this.C[0] : this.C[1]].n, 0xffffff, 2).setDepth(20),
-      label(this, 320, 290, 'REVANCHA', 0xffffff, 2).setDepth(20),
-      label(this, 320, 330, 'ELEGIR PERSONAJES', 0x8c8c8c, 2).setDepth(20),
-      label(this, 320, 400, 'ARRIBA/ABAJO MOVER - BTN 1 ELEGIR', 0x8c8c8c).setDepth(20),
-    ];
-    this.l = [this.U[2], this.U[3]];
+    this.U = [this.add.rectangle(320, 290, 440, 250, 0x0e1320, 0.82).setStrokeStyle(1, 0x2b3648).setDepth(1), label(this, 320, 180, '¡GANO ' + who + '!', 0xff1a1a, 3).setDepth(20), label(this, 320, 290, 'REVANCHA', 0xffffff, 2).setDepth(20), label(this, 320, 330, 'ELEGIR PERSONAJES', 0x8c8c8c, 2).setDepth(20), label(this, 320, 370, 'VOLVER AL INICIO', 0x8c8c8c, 2).setDepth(20)];
+    this.l = [this.U[2], this.U[3], this.U[4]];
   }
 
   vr() {
-    if (tap('P1_U') || tap('P2_U') || tap('P1_D') || tap('P2_D')) {
-      this.I ^= 1;
+    if (tap('P1_U') || tap('P2_U')) {
+      this.I = (this.I + 2) % 3;
+      sound('poke');
+    }
+    if (tap('P1_D') || tap('P2_D')) {
+      this.I = (this.I + 1) % 3;
       sound('poke');
     }
     if (tap('P1_1') || tap('START1')) {
       clearTaps();
-      if (this.I) this.cs();
-      else this.sf();
+      if (this.I === 2) return this.scene.start('Title');
+      if (this.I === 0) this.sf();
+      else this.cs();
       return;
     }
     this.l.forEach((t, i) => t.setTint(i === this.I ? 0xffffff : 0x8c8c8c));
@@ -3606,8 +3561,6 @@ class VersusScene extends Phaser.Scene {
 
   update(t, dt) {
     const d = min(dt, 50) / 1000;
-    this.r.update(d);
-    this.g.tk(d);
     if (this.M === 0) this.mu();
     else if (this.M === 1) this.cu();
     else if (this.M === 2) this.vf(t, d);
