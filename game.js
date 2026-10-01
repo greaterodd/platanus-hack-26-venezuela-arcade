@@ -1067,17 +1067,17 @@ function makeLights(scene) {
 
 function makeBackdrops(scene) {
   // Storm sky
-  fromCanvas(scene, 'sky', 640, 360, (c) => {
-    const g = c.createLinearGradient(0, 0, 0, 360);
+  fromCanvas(scene, 'sky', 640, 480, (c) => {
+    const g = c.createLinearGradient(0, 0, 0, 480);
     g.addColorStop(0, '#050505');
     g.addColorStop(0.6, '#161616');
     g.addColorStop(1, '#262626');
     c.fillStyle = g;
-    c.fillRect(0, 0, 640, 360);
+    c.fillRect(0, 0, 640, 480);
     const r = rng(21);
     for (let i = 0; i < 60; i++) {
       const x = r() * 700 - 30;
-      const y = r() * 200;
+      const y = r() * 270;
       const w = 60 + r() * 140;
       c.fillStyle = `rgba(${r() > 0.5 ? '40,40,40' : '20,20,20'},0.5)`;
       c.beginPath();
@@ -1087,14 +1087,14 @@ function makeBackdrops(scene) {
   });
 
   // Distant city of spires, repeated horizontally.
-  fromCanvas(scene, 'spires', 640, 360, (c) => {
+  fromCanvas(scene, 'spires', 640, 480, (c) => {
     const r = rng(5);
     c.fillStyle = '#0b0b0b';
     let x = 0;
     while (x < 640) {
       const w = 30 + r() * 60;
-      const h = 80 + r() * 140;
-      const top = 360 - h;
+      const h = 124 + r() * 140;
+      const top = 480 - h;
       c.fillRect(x, top, w, h);
       // spire
       c.beginPath();
@@ -1118,24 +1118,24 @@ function makeBackdrops(scene) {
   });
 
   // Closer silhouettes: flying buttresses and arches.
-  fromCanvas(scene, 'buttress', 640, 360, (c) => {
+  fromCanvas(scene, 'buttress', 640, 480, (c) => {
     const r = rng(8);
     c.fillStyle = '#050505';
-    c.fillRect(0, 300, 640, 60);
+    c.fillRect(0, 420, 640, 60);
     for (let x = 0; x < 640; x += 160) {
       const h = 140 + r() * 60;
-      c.fillRect(x + 10, 360 - h, 26, h);
+      c.fillRect(x + 10, 480 - h, 26, h);
       c.beginPath();
-      c.moveTo(x + 23, 360 - h - 40);
-      c.lineTo(x + 10, 360 - h);
-      c.lineTo(x + 36, 360 - h);
+      c.moveTo(x + 23, 480 - h - 40);
+      c.lineTo(x + 10, 480 - h);
+      c.lineTo(x + 36, 480 - h);
       c.fill();
       // arch
       c.beginPath();
-      c.moveTo(x + 36, 360 - h + 20);
-      c.quadraticCurveTo(x + 100, 360 - h + 10, x + 150, 300);
-      c.lineTo(x + 140, 300);
-      c.quadraticCurveTo(x + 95, 360 - h + 30, x + 36, 360 - h + 34);
+      c.moveTo(x + 36, 480 - h + 20);
+      c.quadraticCurveTo(x + 100, 480 - h + 10, x + 150, 420);
+      c.lineTo(x + 140, 420);
+      c.quadraticCurveTo(x + 95, 480 - h + 30, x + 36, 480 - h + 34);
       c.fill();
     }
   });
@@ -1491,7 +1491,7 @@ class Storm {
       .particles(0, 0, 'drop', {
         x: { min: -60, max: width + 120 },
         y: -20,
-        lifespan: 800,
+        lifespan: 1000,
         speedY: { min: 520, max: 640 },
         speedX: { min: -135, max: -115 },
         alpha: { min: 0.25, max: 0.55 },
@@ -1506,7 +1506,7 @@ class Storm {
       .particles(0, 0, 'drop', {
         x: { min: -60, max: width + 120 },
         y: -20,
-        lifespan: 600,
+        lifespan: 750,
         speedY: { min: 700, max: 800 },
         speedX: { min: -170, max: -150 },
         alpha: { min: 0.1, max: 0.22 },
@@ -1566,7 +1566,7 @@ class Storm {
       }
       g.strokePath();
     };
-    seg(x, 0, 16, 2, 0);
+    seg(x, 0, 21, 2, 0);
   }
 
   update(dt) {
@@ -1612,7 +1612,7 @@ class TitleScene extends Phaser.Scene {
     this.storm = new Storm(this, { minGap: 2500, maxGap: 6000 });
     this.storm.onStrike = (p) => this.glitch.hit(0.5 * p);
 
-    this.add.tileSprite(0, 40, width, height, 'spires').setOrigin(0).setScrollFactor(0).setDepth(-22);
+    this.add.tileSprite(0, 84, width, height, 'spires').setOrigin(0).setScrollFactor(0).setDepth(-22);
     this.add.tileSprite(0, 70, width, height, 'buttress').setOrigin(0).setScrollFactor(0).setDepth(-21);
 
     // The child, small against the storm.
@@ -1627,22 +1627,22 @@ class TitleScene extends Phaser.Scene {
 
     const serif = 'Georgia, "Times New Roman", serif';
     this.titleShadow = this.add
-      .text(width / 2 + 3, 70, 'THE DROWNED BELL', { fontFamily: serif, fontSize: '46px', color: '#b00010', fontStyle: 'bold' })
+      .text(width / 2 + 3, 92, 'THE DROWNED BELL', { fontFamily: serif, fontSize: '46px', color: '#b00010', fontStyle: 'bold' })
       .setOrigin(0.5)
       .setDepth(20);
     this.title = this.add
-      .text(width / 2, 68, 'THE DROWNED BELL', { fontFamily: serif, fontSize: '46px', color: '#f0f0f0', fontStyle: 'bold' })
+      .text(width / 2, 90, 'THE DROWNED BELL', { fontFamily: serif, fontSize: '46px', color: '#f0f0f0', fontStyle: 'bold' })
       .setOrigin(0.5)
       .setDepth(21);
     this.add
-      .text(width / 2, 108, 'a nocturne in black, white & crimson', { fontFamily: serif, fontSize: '14px', color: '#8c8c8c', fontStyle: 'italic' })
+      .text(width / 2, 132, 'a nocturne in black, white & crimson', { fontFamily: serif, fontSize: '14px', color: '#8c8c8c', fontStyle: 'italic' })
       .setOrigin(0.5)
       .setDepth(21);
 
     this.add
       .text(
         width / 2,
-        166,
+        212,
         'STICK  move      BUTTON 1  jump / hold to glide\nBUTTON 2  use tool (hold: focus flashlight)      BUTTON 3 / 4  switch tool\n\nGet hit and you drop your tool \u2014 grab it back before it fades.',
         { fontFamily: 'monospace', fontSize: '11px', color: '#9a9a9a', align: 'center', lineSpacing: 4 },
       )
@@ -1650,7 +1650,7 @@ class TitleScene extends Phaser.Scene {
       .setDepth(21);
 
     this.prompt = this.add
-      .text(width / 2, 238, '[ PRESS START ]', { fontFamily: 'monospace', fontSize: '16px', color: '#ffffff' })
+      .text(width / 2, 312, '[ PRESS START ]', { fontFamily: 'monospace', fontSize: '16px', color: '#ffffff' })
       .setOrigin(0.5)
       .setDepth(21);
 
@@ -2678,7 +2678,8 @@ class GameScene extends Phaser.Scene {
     for (let i = 0; i < 4; i++) {
       const x = cam.scrollX + Math.random() * cam.width;
       const top = Math.max(0, Math.floor(cam.scrollY / T));
-      for (let ty = top; ty < top + 24 && ty < H; ty++) {
+      const bottom = Math.min(H, top + Math.ceil(cam.height / T) + 1);
+      for (let ty = top; ty < bottom; ty++) {
         const v = this.tileAt(x, ty * T + 1);
         if (v === SOLID || v === BEAM) {
           this.splashFx.emitParticleAt(x, ty * T, 2);
@@ -2770,9 +2771,9 @@ class GameScene extends Phaser.Scene {
   updateParallax() {
     const cam = this.cameras.main;
     this.spires.tilePositionX = cam.scrollX * 0.1;
-    this.spires.y = 30 - cam.scrollY * 0.06;
+    this.spires.y = 10 - cam.scrollY * 0.06;
     this.buttress.tilePositionX = cam.scrollX * 0.25;
-    this.buttress.y = 90 - cam.scrollY * 0.15;
+    this.buttress.y = 21 - cam.scrollY * 0.15;
   }
 
   // ------------------------------------------------------------------ ending
@@ -2839,7 +2840,7 @@ new Phaser.Game({
   type: Phaser.WEBGL,
   parent: 'game-root',
   width: 640,
-  height: 360,
+  height: 480,
   backgroundColor: '#000000',
   pixelArt: true,
   roundPixels: true,
