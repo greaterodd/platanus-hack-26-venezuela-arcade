@@ -1430,6 +1430,52 @@ class BootScene extends Phaser.Scene {
 const TOOLS = ['flashlight', 'crowbar', 'umbrella', 'revolver'];
 const TOOL_NAMES = { flashlight: 'LINTERNA', crowbar: 'PATA DE CABRA', umbrella: 'PARAGUAS', revolver: 'REVOLVER' };
 
+// The controls, shown rather than told: what the child does, then the button
+// that does it. Shared by the title and pause screens.
+function controlsLegend(scene, dy = 0) {
+  const mid = SCREEN_W / 2;
+  const img = (x, y, key, frame) => image(scene, x, y, key, 21, 0.5, 0.5, frame).setScale(2);
+  const gfx = scene.add.graphics().setDepth(21);
+  [
+    ['MOVER', 'JOYSTICK', (x, y) => scene.add.sprite(x, y, 'child').setScale(2).setDepth(21).play('child-run')],
+    [
+      'USAR',
+      'BTN 2',
+      (x, y) => {
+        image(scene, x + 10, y, 'cone', 20, 0, 0.5).setScale(0.2).setAlpha(0.5);
+        img(x - 12, y, 'child', 0);
+        img(x + 4, y + 4, 'tool_flashlight');
+      },
+    ],
+    [
+      'SALTAR / PLANEAR',
+      'BTN 1',
+      (x, y) => {
+        img(x, y + 4, 'child', 4);
+        img(x, y - 30, 'umbrella_open');
+      },
+    ],
+    ['CAMBIAR', 'BTN 5 / 6', (x, y) => TOOLS.slice(0, 3).forEach((t, i) => img(x + (i - 1) * 30, y + 6, 'tool_' + t))],
+    [
+      'APUNTAR',
+      'BTN 2 Y JOYSTICK',
+      (x, y) => {
+        img(x - 12, y, 'child', 0);
+        img(x + 14, y - 22, 'reticle').setRotation(-PI / 4);
+      },
+    ],
+  ].forEach(([act, btn, icon], i) => {
+    const x = mid + (i - 2) * 124;
+    icon(x, 214 + dy);
+    label(scene, x, 250 + dy, act).setDepth(21);
+    gfx.fillStyle(0x4a4a4a).fillRect(x - 13, 276 + dy, 26, 6);
+    if (i) gfx.fillStyle(0xc00010).fillRect(x - 8, 268 + dy, 16, 8).fillStyle(0xff1a1a).fillRect(x - 6, 266 + dy, 12, 4);
+    else gfx.fillStyle(0x9a9a9a).fillRect(x, 264 + dy, 3, 12).fillStyle(0xff1a1a).fillRect(x - 3, 259 + dy, 9, 8);
+    label(scene, x, 292 + dy, btn, 0x8c8c8c).setDepth(21);
+  });
+  label(scene, mid, 314 + dy, 'ABAJOX2: BAJAR VIGAS   PINTURA AMARILLA: SE ROMPE   BTN 4: SILENCIAR', 0x6a6a6a).setDepth(21);
+}
+
 class TitleScene extends Phaser.Scene {
   constructor() {
     super('Title');
@@ -1455,47 +1501,7 @@ class TitleScene extends Phaser.Scene {
 
     this.ts = image(this, mid + 3, 98, 'logo', 20).setTintFill(0xb00010);
     this.tt = image(this, mid, 96, 'logo', 21);
-    // Controls, shown rather than told: what the child does, then the button that does it.
-    const img = (x, y, key, frame) => image(this, x, y, key, 21, 0.5, 0.5, frame).setScale(2);
-    const gfx = this.add.graphics().setDepth(21);
-    [
-      ['MOVER', 'JOYSTICK', (x, y) => this.add.sprite(x, y, 'child').setScale(2).setDepth(21).play('child-run')],
-      [
-        'USAR',
-        'BTN 2',
-        (x, y) => {
-          image(this, x + 10, y, 'cone', 20, 0, 0.5).setScale(0.2).setAlpha(0.5);
-          img(x - 12, y, 'child', 0);
-          img(x + 4, y + 4, 'tool_flashlight');
-        },
-      ],
-      [
-        'SALTAR / PLANEAR',
-        'BTN 1',
-        (x, y) => {
-          img(x, y + 4, 'child', 4);
-          img(x, y - 30, 'umbrella_open');
-        },
-      ],
-      ['CAMBIAR', 'BTN 5 / 6', (x, y) => TOOLS.slice(0, 3).forEach((t, i) => img(x + (i - 1) * 30, y + 6, 'tool_' + t))],
-      [
-        'APUNTAR',
-        'BTN 2 Y JOYSTICK',
-        (x, y) => {
-          img(x - 12, y, 'child', 0);
-          img(x + 14, y - 22, 'reticle').setRotation(-PI / 4);
-        },
-      ],
-    ].forEach(([act, btn, icon], i) => {
-      const x = mid + (i - 2) * 124;
-      icon(x, 214);
-      label(this, x, 250, act).setDepth(21);
-      gfx.fillStyle(0x4a4a4a).fillRect(x - 13, 276, 26, 6);
-      if (i) gfx.fillStyle(0xc00010).fillRect(x - 8, 268, 16, 8).fillStyle(0xff1a1a).fillRect(x - 6, 266, 12, 4);
-      else gfx.fillStyle(0x9a9a9a).fillRect(x, 264, 3, 12).fillStyle(0xff1a1a).fillRect(x - 3, 259, 9, 8);
-      label(this, x, 292, btn, 0x8c8c8c).setDepth(21);
-    });
-    label(this, mid, 314, 'ABAJOX2: BAJAR VIGAS   PINTURA AMARILLA: SE ROMPE   BTN 4: SILENCIAR', 0x6a6a6a).setDepth(21);
+    controlsLegend(this);
     this.pr = label(this, mid, 344, 'PULSA START', 0xffffff, 2).setDepth(21);
 
     const start = () => {
@@ -1525,6 +1531,32 @@ class TitleScene extends Phaser.Scene {
     this.tt.x = mid + jitter;
     this.ts.x = mid + 3 - jitter * 1.5 + (random() < 0.05 ? 8 : 0);
     for (const e of this.ey) e.setAlpha(0.6 + random() * 0.4 + this.st.lv);
+  }
+}
+
+// START toggles the game between running and frozen, over a screen that repeats
+// the title's legend so the controls are always a button away.
+class PauseScene extends Phaser.Scene {
+  constructor() {
+    super('Pause');
+  }
+
+  create() {
+    const mid = SCREEN_W / 2;
+    this.add.rectangle(0, 0, SCREEN_W, SCREEN_H, 0x000000, 0.85).setOrigin(0).setScrollFactor(0);
+    controlsLegend(this, -60);
+    this.pr = label(this, mid, 296, 'PAUSA', 0xffffff, 3).setDepth(21);
+    label(this, mid, 328, 'PULSA START PARA CONTINUAR', 0x9a9a9a).setDepth(21);
+  }
+
+  update(time) {
+    this.pr.setAlpha(floor(time / 500) % 2 ? 0.35 : 1);
+    if (tap('START1') || tap('START2')) {
+      clearTaps();
+      this.scene.resume('Game');
+      this.scene.resume('Hud');
+      this.scene.stop();
+    }
   }
 }
 
@@ -1810,10 +1842,16 @@ class GameScene extends Phaser.Scene {
   }
 
   bd() {
+    // Pull the scenery down behind the child so it never swallows him, while
+    // keeping the bricks he stands on (depth 0) readable.
+    this.bgv = this.add.rectangle(0, 0, SCREEN_W, SCREEN_H, 0, 0.5).setOrigin(0).setScrollFactor(0).setDepth(-0.5);
     this.dk = this.add.renderTexture(0, 0, SCREEN_W, SCREEN_H).setOrigin(0).setScrollFactor(0).setDepth(50);
     // Additive glow under the darkness so light visibly lights the rain and stone.
     this.cn = image(this, 0, 0, 'cone', 45, 0, 0.5).setBlendMode(1).setVisible(false);
-    this.ag = image(this, 0, 0, 'light', 45).setBlendMode(1).setAlpha(0.05).setScale(0.8);
+    this.ag = image(this, 0, 0, 'light', 45).setBlendMode(1).setAlpha(0.06).setScale(0.8);
+    // Soft dark pool that follows the child and fades to nothing at its rim,
+    // so the scenery never competes with him. Sits under the bricks (depth 0).
+    this.au = image(this, 0, 0, 'light', -0.4).setTint(0x000000).setScale(3);
     this.ds = this.add.graphics().setDepth(61);
   }
 
@@ -2402,7 +2440,10 @@ class GameScene extends Phaser.Scene {
     dark.fill(0, max(0.32, BASE_DARK * (this.bs ? 0.6 : 1) * (1 - 0.93 * min(1, flash * 1.4))));
 
     const p = this.pl;
-    if (!this.dd) light(p.x, p.y - 12, 74);
+    // The dark pool hides the scenery around the child; only a tight reveal
+    // at his feet lets him (and the bricks under him) read through.
+    this.au.setPosition(p.x, p.y - 10).setVisible(!this.dd);
+    if (!this.dd) light(p.x, p.y - 12, 80);
     this.ag.setPosition(p.x, p.y - 12).setVisible(!this.dd);
     for (const l of this.lh) {
       const f = l.fl ? 0.9 + sin(time / 90 + l.x) * 0.05 + random() * 0.05 : 1;
@@ -2670,6 +2711,14 @@ class GameScene extends Phaser.Scene {
     const dt = min(delta, 50) / 1000;
     const cam = this.cm;
 
+    // START freezes the world; the Pause scene resumes it on the next press.
+    if (tap('START1') || tap('START2')) {
+      this.scene.launch('Pause');
+      this.scene.pause();
+      this.scene.pause('Hud');
+      return;
+    }
+
     this.ut(dt, time);
     this.ul(dt, time);
     // Dread: the picture breaks up as monsters close in, and a little when empty-handed.
@@ -2791,6 +2840,6 @@ new Phaser.Game({
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
-  scene: [BootScene, TitleScene, GameScene, HudScene],
+  scene: [BootScene, TitleScene, GameScene, HudScene, PauseScene],
 });
 })();
