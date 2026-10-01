@@ -998,9 +998,9 @@ function makeProps(scene) {
 function makeLights(scene) {
   fromCanvas(scene, 'light', 128, 128, (c) => {
     const g = c.createRadialGradient(64, 64, 0, 64, 64, 64);
-    g.addColorStop(0, 'rgba(255,255,255,1)');
-    g.addColorStop(0.45, 'rgba(255,255,255,0.9)');
-    g.addColorStop(0.75, 'rgba(255,255,255,0.45)');
+    g.addColorStop(0, 'rgba(255,255,255,0.85)');
+    g.addColorStop(0.45, 'rgba(255,255,255,0.55)');
+    g.addColorStop(0.75, 'rgba(255,255,255,0.22)');
     g.addColorStop(1, 'rgba(255,255,255,0)');
     c.fillStyle = g;
     c.fillRect(0, 0, 128, 128);
@@ -1020,7 +1020,7 @@ function makeLights(scene) {
           const edge = 1 - Math.pow(a / spread, 3);
           const fall = 1 - Math.pow(d / 256, 2.4);
           v = Math.max(0, edge * fall);
-          if (d < 14) v = Math.max(v, 1 - d / 14);
+          if (d < 14) v = Math.max(v, 0.6 * (1 - d / 14));
         }
         const i = (y * 256 + x) * 4;
         img.data[i] = img.data[i + 1] = img.data[i + 2] = 255;
@@ -1455,7 +1455,7 @@ void main() {
       vec4 s = texture2D(uMainSampler, uv + vec2(0.0, float(i) * 3.0 / resolution.y));
       if (luma(s.rgb) > luma(m.rgb)) { m = s; }
     }
-    col = mix(col, m, 0.9);
+    col = mix(col, m, 0.6);
   }
 
   col.rgb *= 0.86 + 0.14 * sin(outTexCoord.y * resolution.y * 3.14159);
@@ -1614,7 +1614,7 @@ class Storm {
     this.flash = Math.max(0, this.flash - dt * 1.6);
     this.bolt.setAlpha(this.flash > 0.3 ? 1 : this.flash * 3);
     this.skyFlash.setAlpha(this.flash * 0.45);
-    this.flashRect.setAlpha(this.flash * 0.18);
+    this.flashRect.setAlpha(this.flash * 0.12);
   }
 }
 
@@ -1975,7 +1975,7 @@ class GameScene extends Phaser.Scene {
     const l = { x: shrine.x, y: shrine.y - 16, r: 80, flicker: true };
     this.lights.push(l);
     if (this.dark) {
-      l.glow = this.add.image(l.x, l.y, 'light').setBlendMode(Phaser.BlendModes.ADD).setDepth(45).setScale(88 / 64);
+      l.glow = this.add.image(l.x, l.y, 'light').setBlendMode(Phaser.BlendModes.ADD).setDepth(45).setScale(88 / 64).setAlpha(0.07);
     }
     if (!silent) {
       audio.play('checkpoint');
@@ -2054,9 +2054,9 @@ class GameScene extends Phaser.Scene {
     // Additive glow under the darkness so light visibly lights the rain and stone.
     const ADD = Phaser.BlendModes.ADD;
     this.coneGlow = this.add.image(0, 0, 'cone').setOrigin(0, 0.5).setBlendMode(ADD).setDepth(45).setVisible(false);
-    this.auraGlow = this.add.image(0, 0, 'light').setBlendMode(ADD).setDepth(45).setAlpha(0.1);
+    this.auraGlow = this.add.image(0, 0, 'light').setBlendMode(ADD).setDepth(45).setAlpha(0.05);
     for (const l of this.lights) {
-      l.glow = this.add.image(l.x, l.y, 'light').setBlendMode(ADD).setDepth(45).setScale((l.r * 1.1) / 64).setAlpha(0.14);
+      l.glow = this.add.image(l.x, l.y, 'light').setBlendMode(ADD).setDepth(45).setScale((l.r * 1.1) / 64).setAlpha(0.07);
     }
     this.dropBars = this.add.graphics().setDepth(61);
   }
@@ -2716,7 +2716,7 @@ class GameScene extends Phaser.Scene {
     const sx = cam.scrollX;
     const sy = cam.scrollY;
     const dark = this.dark;
-    const alpha = BASE_DARK * (1 - 0.93 * Math.min(1, this.storm.flash * 1.4));
+    const alpha = Math.max(0.32, BASE_DARK * (1 - 0.93 * Math.min(1, this.storm.flash * 1.4)));
     const onScreen = (x, y, r) => x + r > sx && x - r < sx + cam.width && y + r > sy && y - r < sy + cam.height;
     const light = (x, y, r, a = 1) => {
       if (!onScreen(x, y, r)) return;
@@ -2732,7 +2732,7 @@ class GameScene extends Phaser.Scene {
     for (const l of this.lights) {
       const f = l.flicker ? 0.9 + Math.sin(time / 90 + l.x) * 0.05 + Math.random() * 0.05 : 1;
       light(l.x, l.y, l.r * f, 1);
-      if (l.glow) l.glow.setAlpha(0.12 * f + this.storm.flash * 0.1);
+      if (l.glow) l.glow.setAlpha(0.06 * f + this.storm.flash * 0.05);
     }
     for (const item of this.pickups.getChildren()) light(item.x, item.y, 26, 0.7);
 
@@ -2754,7 +2754,7 @@ class GameScene extends Phaser.Scene {
         .setPosition(c.x, c.y)
         .setScale(scaleX, scaleX * (Math.tan(c.half) / Math.tan(0.42)))
         .setRotation(c.angle)
-        .setAlpha((this.focus ? 0.4 : 0.26) * this.flicker);
+        .setAlpha((this.focus ? 0.2 : 0.12) * this.flicker);
     } else {
       this.coneGlow.setVisible(false);
     }
