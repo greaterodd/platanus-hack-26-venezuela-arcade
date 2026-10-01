@@ -1071,10 +1071,6 @@ function makeProps() {
       pen.stroke();
     }
   });
-  fromCanvas('stalagmite', 20, 24, () => {
-    shape('#0c0a08', 'M10 0L19 24L1 24Z');
-    shape('#464039', 'M10 0L14 24L6 24Z');
-  });
   // The child's cabin: dark planks, a lit window and a stooped roof.
   fromCanvas('house', 60, 54, () => {
     box('#080604', 6, 22, 48, 32);
@@ -1409,7 +1405,6 @@ function buildWorld() {
   cracked(44, 26, 46, 27); // way down into the crypt
   e('tree', 40, 26, 68, 26, 86, 11);
   one('tree', 52, 26, true);
-  one('stalagmite', 37, 26);
   e('scrub', 43, 23, 51, 20, 58, 17, 65, 14, 75, 11, 83, 11, 50, 26, 84, 26);
   e('candle', 71, 11, 86, 11);
   e('shade', 58, 26, 78, 26);
@@ -1428,8 +1423,6 @@ function buildWorld() {
   e('shade', 52, 36, 77, 36);
   e('bat', 75, 31);
   e('candle', 40, 36, 65, 36, 80, 36);
-  e('stalagmite', 38, 36, 74, 36, 82, 36);
-  e('stalactite', 40, 28, 47, 28, 54, 28, 63, 28, 70, 28, 79, 28, 85, 28);
   // Shaft back up to the hillside.
   fill(85, 26, 87, 27, EMPTY);
   beam(85, 87, 33);
@@ -1855,8 +1848,6 @@ const PROPS = {
   grave: [1, -2, 1],
   cross: [1, -2, 1],
   scrub: [1, -2, 1],
-  stalagmite: [1, -1, 1],
-  stalactite: [0, -1, 0],
   house: [1, -1, 2],
   candle: [1, -1, 0],
   candelabra: [1, -1, 0],
@@ -1965,9 +1956,6 @@ function buildEntities() {
         break;
       case 'house':
         addLight(px + 16, py - 19, 64);
-        break;
-      case 'stalactite':
-        s.setTexture('stalagmite').setFlipY(true);
         break;
       case 'foresteyes': {
         const ey = image(stage, px, py, 'eyes', -5).setScale(1.4).setAlpha(0.5);
