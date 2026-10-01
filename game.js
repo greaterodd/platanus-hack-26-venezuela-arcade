@@ -447,6 +447,7 @@ const PAL = {
   s: '#c9c9c9', // pale skin
   r: '#ff1a1a', // red eyes
   R: '#7a0008', // dark red
+  c: '#c00010', // umbrella canopy
   1: '#0e0e0e',
   2: '#232323',
   3: '#383838',
@@ -620,12 +621,12 @@ const ICONS = {
   ],
   umbrella: [
     '.......1........',
-    '......151.......',
-    '.....15551......',
-    '....1555551.....',
-    '...155555551....',
-    '..15556555551...',
-    '.1555565555551..',
+    '......1c1.......',
+    '.....1ccc1......',
+    '....1ccccc1.....',
+    '...1ccccccc1....',
+    '..1cccrccccc1...',
+    '.1ccccrcccccc1..',
     '.1.1.1.5.1.1.1..',
     '.......5........',
     '.......5........',
@@ -638,12 +639,12 @@ const ICONS = {
 
 const UMBRELLA_OPEN = [
   '..........1111111111..........',
-  '.......1115555555555111.......',
-  '.....11555555565555555511.....',
-  '...115555555556555555555511...',
-  '..15555555555565555555555551..',
-  '.1555555555555655555555555551.',
-  '155555555555556555555555555551',
+  '.......111cccccccccc111.......',
+  '.....11cccccccrcccccccc11.....',
+  '...11cccccccccrcccccccccc11...',
+  '..1cccccccccccrcccccccccccc1..',
+  '.1ccccccccccccrccccccccccccc1.',
+  '1cccccccccccccrcccccccccccccc1',
   '1.1..1..1..1..5..1..1..1..1.11',
   '..............5...............',
   '..............5...............',
@@ -762,6 +763,14 @@ function makeTiles(scene) {
     c.fillStyle = '#8a8a8a';
     c.fillRect(9, 3, 1, 1);
     c.fillRect(5, 9, 1, 1);
+    // yellow paint daubed across it: this stone can be broken
+    c.fillStyle = '#e8c21a';
+    for (let i = 0; i < 12; i++) c.fillRect(2 + i, 13 - i, 2, 2);
+    c.fillRect(1, 1, 3, 2);
+    c.fillRect(12, 13, 3, 2);
+    c.fillStyle = '#8a7410';
+    c.fillRect(4, 14, 1, 2);
+    c.fillRect(13, 4, 1, 3);
   });
 
   fromCanvas(scene, 'spikes', 16, 16, (c) => {
@@ -1086,9 +1095,9 @@ function makeLogo(scene) {
 }
 
 // 5x7 pixel font, one base-32 digit per row; drawn 2px wide for chunky 8-bit stems.
-const FONT_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,!?&-:/() ';
+const FONT_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,!?&-:/() Ñ¡¿';
 const FONT =
-  'ehhvhhhuhhuhhuehgggheuhhhhhuvgguggvvggugggehgjhhehhhvhhhe44444e1111hhehikokihggggggvhrrhhhhhppljjhehhhhheuhhugggehhhliduhhukihehge1hev444444hhhhhhehhhhaa4hhhhrrhhha4ahhhha4444v1248gvehjlphe4c4444eeh168gveh161he26aiv22vgu11heegguhhev124444ehhehheehhf11e000008800004484444404eh124048kk8lid000e000044044011248gg24888428422248';
+  'ehhvhhhuhhuhhuehgggheuhhhhhuvgguggvvggugggehgjhhehhhvhhhe44444e1111hhehikokihggggggvhrrhhhhhppljjhehhhhheuhhugggehhhliduhhukihehge1hev444444hhhhhhehhhhaa4hhhhrrhhha4ahhhha4444v1248gvehjlphe4c4444eeh168gveh161he26aiv22vgu11heegguhhev124444ehhehheehhf11e000008800004484444404eh124048kk8lid000e000044044011248gg248884284222480000000ehpljhh40444444048ghe';
 
 function makeFont(scene) {
   fromCanvas(scene, 'font', FONT_CHARS.length * 8, 8, (c) => {
@@ -1664,15 +1673,48 @@ class TitleScene extends Phaser.Scene {
 
     this.titleShadow = this.add.image(width / 2 + 3, 98, 'logo').setTintFill(0xb00010).setDepth(20);
     this.title = this.add.image(width / 2, 96, 'logo').setDepth(21);
-    label(this, width / 2, 186, 'A NOCTURNE IN BLACK, WHITE & CRIMSON', 0x8c8c8c).setDepth(21);
-    label(
-      this,
-      width / 2,
-      244,
-      'STICK  MOVE      BUTTON 1  USE TOOL (HOLD: FOCUS FLASHLIGHT)\n\nBUTTON 2  JUMP / HOLD TO GLIDE      BUTTON 3 / 4  SWITCH TOOL\n\nBUTTON 6 & STICK  FREE AIM      BUTTON 5  MUTE\n\nGET HIT AND YOU DROP YOUR TOOL - GRAB IT BACK BEFORE IT FADES.',
-      0x9a9a9a,
-    ).setDepth(21);
-    this.prompt = label(this, width / 2, 326, 'PRESS START', 0xffffff, 2).setDepth(21);
+    // Controls, shown rather than told: what the child does, then the button that does it.
+    const img = (x, y, key, frame) => this.add.image(x, y, key, frame).setScale(2).setDepth(21);
+    const gfx = this.add.graphics().setDepth(21);
+    [
+      ['MOVER', 'JOYSTICK', (x, y) => this.add.sprite(x, y, 'child').setScale(2).setDepth(21).play('child-run')],
+      [
+        'USAR',
+        'BTN 1',
+        (x, y) => {
+          this.add.image(x + 10, y, 'cone').setOrigin(0, 0.5).setScale(0.2).setAlpha(0.5).setDepth(20);
+          img(x - 12, y, 'child', 0);
+          img(x + 4, y + 4, 'tool_flashlight');
+        },
+      ],
+      [
+        'SALTAR / PLANEAR',
+        'BTN 2',
+        (x, y) => {
+          img(x, y + 4, 'child', 4);
+          img(x, y - 30, 'umbrella_open');
+        },
+      ],
+      ['CAMBIAR', 'BTN 3 / 4', (x, y) => TOOLS.forEach((t, i) => img(x + (i - 1) * 30, y + 6, `tool_${t}`))],
+      [
+        'APUNTAR',
+        'BTN 6 Y JOYSTICK',
+        (x, y) => {
+          img(x - 12, y, 'child', 0);
+          img(x + 14, y - 22, 'reticle').setRotation(-Math.PI / 4);
+        },
+      ],
+    ].forEach(([act, btn, icon], i) => {
+      const x = width / 2 + (i - 2) * 124;
+      icon(x, 214);
+      label(this, x, 250, act).setDepth(21);
+      gfx.fillStyle(0x4a4a4a).fillRect(x - 13, 276, 26, 6);
+      if (i) gfx.fillStyle(0xc00010).fillRect(x - 8, 268, 16, 8).fillStyle(0xff1a1a).fillRect(x - 6, 266, 12, 4);
+      else gfx.fillStyle(0x9a9a9a).fillRect(x, 264, 3, 12).fillStyle(0xff1a1a).fillRect(x - 3, 259, 9, 8);
+      label(this, x, 292, btn, 0x8c8c8c).setDepth(21);
+    });
+    label(this, width / 2, 314, 'ABAJO X2: BAJAR POR LAS VIGAS   PINTURA AMARILLA: SE ROMPE   BTN 5: SILENCIAR', 0x6a6a6a).setDepth(21);
+    this.prompt = label(this, width / 2, 344, 'PULSA START', 0xffffff, 2).setDepth(21);
 
     const start = () => {
       if (this.starting) return;
@@ -1712,7 +1754,7 @@ const DROP_TIME = 5000; // how long a dropped tool waits on the ground
 const BASE_DARK = 0.8;
 const HUD_LINGER = 4000; // ms the HUD stays up after a tool change or a hit
 const TOOLS = ['flashlight', 'crowbar', 'umbrella'];
-const TOOL_NAMES = { flashlight: 'FLASHLIGHT', crowbar: 'CROWBAR', umbrella: 'UMBRELLA' };
+const TOOL_NAMES = { flashlight: 'LINTERNA', crowbar: 'PATA DE CABRA', umbrella: 'PARAGUAS' };
 
 class GameScene extends Phaser.Scene {
   constructor() {
@@ -1736,6 +1778,9 @@ class GameScene extends Phaser.Scene {
     this.stunUntil = 0;
     this.lastGround = 0;
     this.jumpPressedAt = -1e9;
+    this.downAt = -1e9;
+    this.dropRow = -1; // beam row being dropped through
+    this.dropUntil = 0;
     this.attackCooldown = 0;
     this.swingUntil = 0;
     this.gliding = false;
@@ -1764,7 +1809,7 @@ class GameScene extends Phaser.Scene {
     cam.setBounds(0, 0, W * T, H * T);
     cam.startFollow(this.player, true, 0.12, 0.12, 0, 30);
 
-    this.time.delayedCall(900, () => this.hint('start', 'STICK move - BUTTON 2 jump - your FLASHLIGHT burns what hides in the dark'));
+    this.time.delayedCall(900, () => this.hint('start', 'JOYSTICK mover - BOTON 2 saltar - tu LINTERNA quema lo que acecha'));
   }
 
   buildBackdrop() {
@@ -1979,7 +2024,7 @@ class GameScene extends Phaser.Scene {
     }
     if (!silent) {
       audio.play('checkpoint');
-      this.message('The candles remember you.');
+      this.message('Las velas te recuerdan.');
     }
   }
 
@@ -2039,7 +2084,8 @@ class GameScene extends Phaser.Scene {
     this.umbrellaOpen = this.add.image(p.x, p.y, 'umbrella_open').setDepth(11).setVisible(false);
     this.reticle = this.add.image(p.x, p.y, 'reticle').setDepth(62).setVisible(false);
 
-    this.physics.add.collider(p, this.layer);
+    // The beam row being dropped through stops holding the child up.
+    this.physics.add.collider(p, this.layer, null, (_, t) => t.index !== TILE.BEAM || t.y !== this.dropRow);
     this.physics.add.collider(p, this.crackedGroup);
     this.physics.add.collider(p, this.veilGroup);
     this.physics.add.overlap(p, this.shades, (_, m) => this.onMonsterTouch(m));
@@ -2154,11 +2200,11 @@ class GameScene extends Phaser.Scene {
     if (first) {
       audio.play('newtool');
       this.glitch.hit(0.4);
-      if (tool === 'crowbar') this.message('CROWBAR - press BUTTON 1 to swing. Cracked stone gives way.', 5000);
-      if (tool === 'umbrella') this.message('UMBRELLA - hold BUTTON 2 while falling to glide.', 5000);
+      if (tool === 'crowbar') this.message('PATA DE CABRA - pulsa BOTON 1 para golpear. La piedra agrietada cede.', 5000);
+      if (tool === 'umbrella') this.message('PARAGUAS - manten BOTON 2 al caer para planear.', 5000);
     } else {
       audio.play('pickup');
-      this.message(`Got your ${TOOL_NAMES[tool]} back.`, 1800);
+      this.message(`Recuperaste: ${TOOL_NAMES[tool]}.`, 1800);
     }
   }
 
@@ -2170,9 +2216,9 @@ class GameScene extends Phaser.Scene {
     audio.play('drop');
     if (this.hud) this.hud.pulse();
     if (!this.hintsShown.has('drop')) {
-      this.hint('drop', `You dropped the ${TOOL_NAMES[tool]}! Grab it before the dark takes it back.`, 3500);
+      this.hint('drop', `¡Soltaste: ${TOOL_NAMES[tool]}! Recogela antes de que la oscuridad se la lleve.`, 3500);
     } else {
-      this.message(`Dropped the ${TOOL_NAMES[tool]}!`, 1500);
+      this.message(`¡Soltaste: ${TOOL_NAMES[tool]}!`, 1500);
     }
   }
 
@@ -2186,7 +2232,7 @@ class GameScene extends Phaser.Scene {
     item.setVelocity(0, 0);
     item.expires = null;
     item.setAlpha(1);
-    this.message(`The dark took your ${TOOL_NAMES[item.tool]}... it waits by the candles.`, 3500);
+    this.message(`La oscuridad se llevo: ${TOOL_NAMES[item.tool]}... te espera junto a las velas.`, 3500);
   }
 
   updateTools(dt, time) {
@@ -2356,7 +2402,7 @@ class GameScene extends Phaser.Scene {
       if (Math.random() < 0.2) this.glitchFx.emitParticleAt(v.rect.centerX, Phaser.Math.Between(v.rect.top, v.rect.bottom), 1);
       if (Math.random() < 0.05) audio.play('burn');
       if (v.strength <= 0) this.dissolveVeil(v);
-      else this.hint('veil-focus', 'It recoils from the light... hold BUTTON 1 to focus the beam.');
+      else this.hint('veil-focus', 'Retrocede ante la luz... manten BOTON 1 para enfocar el haz.');
     }
   }
 
@@ -2541,7 +2587,7 @@ class GameScene extends Phaser.Scene {
     audio.play('death');
     this.glitch.hit(1.2);
     this.cameras.main.shake(400, 0.02);
-    if (this.hud) this.hud.big('THEY FOUND YOU');
+    if (this.hud) this.hud.big('TE ENCONTRARON');
     this.time.delayedCall(2200, () => {
       if (this.hud) this.hud.clearBig();
       this.hearts = MAX_HEARTS;
@@ -2627,6 +2673,19 @@ class GameScene extends Phaser.Scene {
     }
     if (jumpUp && p.body.velocity.y < 0) p.setVelocityY(p.body.velocity.y * 0.45);
 
+    // Double-tap down to drop through a wooden beam.
+    const b = p.body;
+    if (tap(...BTN.down) && !this.aiming) {
+      const under = b.bottom + 1;
+      if (time - this.downAt < 300 && grounded && (this.tileAt(b.x, under) === BEAM || this.tileAt(b.right - 1, under) === BEAM)) {
+        this.dropRow = Math.floor(under / T);
+        this.dropUntil = time + 600;
+        this.downAt = this.lastGround = -1e9;
+        p.setVelocityY(60);
+      } else this.downAt = time;
+    }
+    if (this.dropRow >= 0 && (b.y > this.dropRow * T || time > this.dropUntil)) this.dropRow = -1;
+
     this.gliding = this.equipped === 'umbrella' && !grounded && jumpHeld && p.body.velocity.y > 0;
     if (this.gliding) p.setVelocityY(Math.min(p.body.velocity.y, GLIDE_FALL));
 
@@ -2655,15 +2714,18 @@ class GameScene extends Phaser.Scene {
       }
     }
 
-    if (p.x > 27 * T && p.x < 34 * T) this.hint('veil', 'A veil of living shadow. Shine the flashlight on it.');
+    if (p.x > 27 * T && p.x < 34 * T) this.hint('veil', 'Un velo de sombra viva. Alumbralo con la linterna.');
     if (p.x > 84 * T && p.x < 90 * T && p.y < 12 * T && !this.found.has('umbrella')) {
-      this.hint('chasm', 'Too far to jump... if only something could slow the fall.', 4000);
+      this.hint('chasm', 'Muy lejos para saltar... si tan solo algo frenara la caida.', 4000);
     }
     if (this.found.has('crowbar') && p.x > 40 * T && p.x < 48 * T && p.y > 20 * T && p.y < 27 * T && this.cracked.has('45,26')) {
-      this.hint('floor', 'The floor here is cracked...');
+      this.hint('floor', 'El piso aqui esta agrietado...');
     }
-    if (p.x < 130 * T && p.x > 110 * T && p.y < 9 * T) this.hint('bell', 'The great bell. Ring it.');
-    if (this.aiming) this.hint('freeaim', 'FREE AIM \u2014 keep BUTTON 6 held, steer with the stick to aim your tool.', 3000);
+    if (grounded && p.x > 85 * T && p.x < 88 * T && p.y > 26 * T && p.y < 28 * T) {
+      this.hint('beam', 'Vigas de madera... pulsa ABAJO dos veces para bajar.');
+    }
+    if (p.x < 130 * T && p.x > 110 * T && p.y < 9 * T) this.hint('bell', 'La gran campana. Hazla sonar.');
+    if (this.aiming) this.hint('freeaim', 'APUNTADO LIBRE - manten BOTON 6 y apunta con el joystick.', 3000);
 
     // Free-aim reticle.
     const dist = 42;
@@ -2790,8 +2852,8 @@ class GameScene extends Phaser.Scene {
     const white = this.add.rectangle(0, 0, width, height, 0xffffff).setOrigin(0).setScrollFactor(0).setDepth(200).setAlpha(0);
     this.tweens.add({ targets: white, alpha: 1, delay: 2600, duration: 2200 });
     const lines = [
-      label(this, width / 2, height / 2 - 22, 'THE BELL TOLLS.', 0, 4),
-      label(this, width / 2, height / 2 + 18, 'THE RAIN FORGETS YOU... FOR NOW', 0x8a0010),
+      label(this, width / 2, height / 2 - 22, 'SUENA LA CAMPANA.', 0, 4),
+      label(this, width / 2, height / 2 + 18, 'LA LLUVIA TE OLVIDA... POR AHORA', 0x8a0010),
     ];
     lines.forEach((t, i) => {
       t.setScrollFactor(0).setDepth(201).setAlpha(0);
@@ -2902,7 +2964,7 @@ class HudScene extends Phaser.Scene {
       this.slotIcons[i].setVisible(known);
       this.slotIcons[i].setAlpha(has ? 1 : dropped.has(t) ? (Math.floor(g.time.now / 150) % 2 ? 0.3 : 0.65) : 0.3);
     });
-    this.toolLabel.setText(g.equipped ? TOOL_NAMES[g.equipped] : 'EMPTY HANDS');
+    this.toolLabel.setText(g.equipped ? TOOL_NAMES[g.equipped] : 'MANOS VACIAS');
     this.toolLabel.setTint(g.equipped ? 0xffffff : 0xff3b3b);
 
     // Fade the panel out once the linger window lapses.
