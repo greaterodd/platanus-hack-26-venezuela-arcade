@@ -68,12 +68,12 @@ const BTN = {
   right: ['P1_R'],
   up: ['P1_U'],
   down: ['P1_D'],
-  jump: ['P1_2', 'P1_U'],
-  use: ['P1_1'],
-  next: ['P1_3'],
+  jump: ['P1_1'],
+  use: ['P1_2'],
+  aim: ['P1_3'],
   prev: ['P1_4'],
-  mute: ['P1_5'],
-  aim: ['P1_6'],
+  next: ['P1_5'],
+  mute: ['P1_6'],
 };
 
 const midi = (m) => 440 * Math.pow(2, (m - 69) / 12);
@@ -1766,7 +1766,7 @@ class TitleScene extends Phaser.Scene {
       ['MOVER', 'JOYSTICK', (x, y) => this.add.sprite(x, y, 'child').setScale(2).setDepth(21).play('child-run')],
       [
         'USAR',
-        'BTN 1',
+        'BTN 2',
         (x, y) => {
           this.add.image(x + 10, y, 'cone').setOrigin(0, 0.5).setScale(0.2).setAlpha(0.5).setDepth(20);
           img(x - 12, y, 'child', 0);
@@ -1775,16 +1775,16 @@ class TitleScene extends Phaser.Scene {
       ],
       [
         'SALTAR / PLANEAR',
-        'BTN 2',
+        'BTN 1',
         (x, y) => {
           img(x, y + 4, 'child', 4);
           img(x, y - 30, 'umbrella_open');
         },
       ],
-      ['CAMBIAR', 'BTN 3 / 4', (x, y) => TOOLS.slice(0, 3).forEach((t, i) => img(x + (i - 1) * 30, y + 6, `tool_${t}`))],
+      ['CAMBIAR', 'BTN 4 / 5', (x, y) => TOOLS.slice(0, 3).forEach((t, i) => img(x + (i - 1) * 30, y + 6, `tool_${t}`))],
       [
         'APUNTAR',
-        'BTN 6 Y JOYSTICK',
+        'BTN 3 Y JOYSTICK',
         (x, y) => {
           img(x - 12, y, 'child', 0);
           img(x + 14, y - 22, 'reticle').setRotation(-Math.PI / 4);
@@ -1799,7 +1799,7 @@ class TitleScene extends Phaser.Scene {
       else gfx.fillStyle(0x9a9a9a).fillRect(x, 264, 3, 12).fillStyle(0xff1a1a).fillRect(x - 3, 259, 9, 8);
       label(this, x, 292, btn, 0x8c8c8c).setDepth(21);
     });
-    label(this, width / 2, 314, 'ABAJO X2: BAJAR POR LAS VIGAS   PINTURA AMARILLA: SE ROMPE   BTN 5: SILENCIAR', 0x6a6a6a).setDepth(21);
+    label(this, width / 2, 314, 'ABAJO X2: BAJAR POR LAS VIGAS   PINTURA AMARILLA: SE ROMPE   BTN 6: SILENCIAR', 0x6a6a6a).setDepth(21);
     this.prompt = label(this, width / 2, 344, 'PULSA START', 0xffffff, 2).setDepth(21);
 
     const start = () => {
@@ -1906,7 +1906,7 @@ class GameScene extends Phaser.Scene {
       audio.whistle(0.14, 76);
       this.hint('whistle', 'Un silbido... dicen que si suena cerca, el esta lejos.', 4500);
     });
-    this.time.delayedCall(900, () => this.hint('start', 'JOYSTICK mover - BOTON 2 saltar - tu LINTERNA quema lo que acecha'));
+    this.time.delayedCall(900, () => this.hint('start', 'JOYSTICK mover - BOTON 1 saltar - tu LINTERNA quema lo que acecha'));
   }
 
   buildBackdrop() {
@@ -2297,8 +2297,8 @@ class GameScene extends Phaser.Scene {
     if (first) {
       audio.play('newtool');
       this.glitch.hit(0.4);
-      if (tool === 'crowbar') this.message('PATA DE CABRA - pulsa BOTON 1 para golpear. La piedra agrietada cede.', 5000);
-      if (tool === 'umbrella') this.message('PARAGUAS - manten BOTON 2 al caer para planear.', 5000);
+      if (tool === 'crowbar') this.message('PATA DE CABRA - pulsa BOTON 2 para golpear. La piedra agrietada cede.', 5000);
+      if (tool === 'umbrella') this.message('PARAGUAS - manten BOTON 1 al caer para planear.', 5000);
       if (tool === 'revolver') this.hearts = MAX_HEARTS;
     } else {
       audio.play('pickup');
@@ -2518,7 +2518,7 @@ class GameScene extends Phaser.Scene {
       if (Math.random() < 0.2) this.glitchFx.emitParticleAt(v.rect.centerX, Phaser.Math.Between(v.rect.top, v.rect.bottom), 1);
       if (Math.random() < 0.05) audio.play('burn');
       if (v.strength <= 0) this.dissolveVeil(v);
-      else this.hint('veil-focus', 'Retrocede ante la luz... manten BOTON 1 para enfocar el haz.');
+      else this.hint('veil-focus', 'Retrocede ante la luz... manten BOTON 2 para enfocar el haz.');
     }
   }
 
@@ -2743,7 +2743,7 @@ class GameScene extends Phaser.Scene {
     const dn = down(...BTN.down);
     const grounded = p.body.blocked.down;
 
-    // Free aim: hold BUTTON 6 (L) and steer with the stick. The stick drives the
+    // Free aim: hold BUTTON 3 (O) and steer with the stick. The stick drives the
     // reticle instead of movement, so the child plants their feet while aiming.
     const hx = (right ? 1 : 0) - (left ? 1 : 0);
     const vy = (dn ? 1 : 0) - (up ? 1 : 0);
@@ -2756,19 +2756,15 @@ class GameScene extends Phaser.Scene {
         this.aim.y = Math.round(Math.sin(q));
         if (this.aim.x) this.facing = this.aim.x;
       }
-      // Up aims instead of jumping while the aim modifier is held.
-      pressed.P1_U = false;
-      released.P1_U = false;
     } else {
       this.aimAngle = this.facing > 0 ? 0 : Math.PI;
       this.aim.x = this.facing;
       this.aim.y = 0;
     }
 
-    const jumpKeys = this.aiming ? ['P1_2'] : BTN.jump;
-    const jumpDown = tap(...jumpKeys);
-    const jumpHeld = down(...jumpKeys);
-    const jumpUp = untap(...jumpKeys);
+    const jumpDown = tap(...BTN.jump);
+    const jumpHeld = down(...BTN.jump);
+    const jumpUp = untap(...BTN.jump);
 
     if (grounded) {
       if (!this.wasGrounded && this.lastVy > 220) audio.play('land');
@@ -2810,7 +2806,7 @@ class GameScene extends Phaser.Scene {
 
     if (tap(...BTN.prev)) this.cycleTool(-1);
     if (tap(...BTN.next)) this.cycleTool(1);
-    if (tap(...BTN.mute)) audio.music.gain.value = audio.music.gain.value > 0 ? 0 : 0.32;
+    if (tap(...BTN.mute)) audio.master.gain.value = audio.master.gain.value > 0 ? 0 : 0.9;
 
     p.setFlipX(this.facing < 0);
     if (!grounded) p.anims.play('child-jump', true);
@@ -2844,7 +2840,7 @@ class GameScene extends Phaser.Scene {
       this.hint('beam', 'Vigas de madera... pulsa ABAJO dos veces para bajar.');
     }
     if (p.x < 130 * T && p.x > 110 * T && p.y < 9 * T) this.hint('bell', 'La gran campana. Hazla sonar.');
-    if (this.aiming) this.hint('freeaim', 'APUNTADO LIBRE - manten BOTON 6 y apunta con el joystick.', 3000);
+    if (this.aiming) this.hint('freeaim', 'APUNTADO LIBRE - manten BOTON 3 y apunta con el joystick.', 3000);
 
     // Free-aim reticle.
     const dist = 42;
@@ -3146,7 +3142,7 @@ class GameScene extends Phaser.Scene {
     this.time.delayedCall(2700, () => {
       this.cut = false;
       this.invulnUntil = this.time.now + 2500;
-      this.message('¡Un revolver! Agarralo y dispara con BOTON 1.', 5000);
+      this.message('¡Un revolver! Agarralo y dispara con BOTON 2.', 5000);
     });
     this.tweens.add({
       targets: [who, ...say],
