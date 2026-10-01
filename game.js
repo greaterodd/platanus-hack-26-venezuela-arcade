@@ -1323,57 +1323,9 @@ function buildWorld() {
 // pixel-sort streaks, scanline corruption and film grain.
 // `amount` 0..1 drives how broken the picture gets.
 // Kept flush left and tight: every byte in here counts against the size limit.
-const FRAG = `
-#ifdef GL_FRAGMENT_PRECISION_HIGH
-precision highp float;
-#else
-precision mediump float;
-#endif
-uniform sampler2D uMainSampler;
-uniform vec2 res;
-uniform float time;
-uniform float amount;
-varying vec2 outTexCoord;
-float rand(vec2 co) {
-vec3 p = fract(vec3(co.xyx) * .1031);
-p += dot(p, p.yzx + 33.33);
-return fract((p.x + p.y) * p.z);
-}
-float luma(vec3 c) {
-return dot(c, vec3(.299, .587, .114));
-}
-void main() {
-vec2 uv = outTexCoord;
-float I = amount;
-float t = mod(floor(time * 14.), 251.);
-float band = floor(uv.y * 28.);
-float tear = step(1. - I * .4, rand(vec2(band, t))) * (rand(vec2(band + 7., t)) - .5) * .16 * I;
-float line = floor(uv.y * res.y);
-uv.x += tear + step(1. - I * .05, rand(vec2(line * .37 + t * 3.1, t + 2.))) * (rand(vec2(line * 1.7, t)) - .5) * .06;
-vec2 blk = floor(uv * vec2(20., 12.));
-if (rand(blk + vec2(t * .37, t * .11)) > 1. - I * .14) {
-uv += (vec2(rand(blk + 1.3), rand(blk + 2.1)) - .5) * .08 * (.5 + I);
-}
-float split = .0012 + I * .014;
-vec2 dir = vec2(split, split * .35 * sin(time * 9.));
-vec4 col = texture2D(uMainSampler, uv);
-col.r = texture2D(uMainSampler, uv + dir).r;
-col.b = texture2D(uMainSampler, uv - dir).b;
-if (step(1. - I * .3, rand(vec2(floor(uv.x * res.x / 2.) * .13, band + t))) > .5) {
-vec4 m = col;
-for (int i = 1; i < 12; i++) {
-vec4 s = texture2D(uMainSampler, uv + vec2(0., float(i) * 3. / res.y));
-if (luma(s.rgb) > luma(m.rgb)) { m = s; }
-}
-col = mix(col, m, .6);
-}
-col.rgb *= .86 + .14 * sin(outTexCoord.y * res.y * 3.14159);
-float cl = step(1. - max(0., I - .12) * .03, rand(vec2(line * .37 + t * 13.1, t * 7.3 + 5.)));
-col.rgb = mix(col.rgb, vec3(rand(vec2(line, t))), cl * .7);
-col.rgb += (rand(outTexCoord * res + t * 17.) - .5) * (.05 + I * .1);
-gl_FragColor = col;
-}
-`;
+// Kept on one line and with one-letter locals: the shader string survives
+// minification verbatim, so every byte here counts against the size limit.
+const FRAG = `precision highp float;uniform sampler2D uMainSampler;uniform vec2 res;uniform float time;uniform float amount;varying vec2 outTexCoord;float R(vec2 a){vec3 p=fract(vec3(a.xyx)*.1031);p+=dot(p,p.yzx+33.33);return fract((p.x+p.y)*p.z);}float L(vec3 c){return dot(c,vec3(.299,.587,.114));}void main(){vec2 u=outTexCoord;float I=amount;float t=mod(floor(time*14.),251.);float b=floor(u.y*28.);float e=step(1.-I*.4,R(vec2(b,t)))*(R(vec2(b+7.,t))-.5)*.16*I;float l=floor(u.y*res.y);u.x+=e+step(1.-I*.05,R(vec2(l*.37+t*3.1,t+2.)))*(R(vec2(l*1.7,t))-.5)*.06;vec2 k=floor(u*vec2(20.,12.));if(R(k+vec2(t*.37,t*.11))>1.-I*.14){u+=(vec2(R(k+1.3),R(k+2.1))-.5)*.08*(.5+I);}float q=.0012+I*.014;vec2 d=vec2(q,q*.35*sin(time*9.));vec4 o=texture2D(uMainSampler,u);o.r=texture2D(uMainSampler,u+d).r;o.b=texture2D(uMainSampler,u-d).b;if(step(1.-I*.3,R(vec2(floor(u.x*res.x/2.)*.13,b+t)))>.5){vec4 m=o;for(int i=1;i<12;i++){vec4 s=texture2D(uMainSampler,u+vec2(0.,float(i)*3./res.y));if(L(s.rgb)>L(m.rgb)){m=s;}}o=mix(o,m,.6);}o.rgb*=.86+.14*sin(outTexCoord.y*res.y*3.14159);float z=step(1.-max(0.,I-.12)*.03,R(vec2(l*.37+t*13.1,t*7.3+5.)));o.rgb=mix(o.rgb,vec3(R(vec2(l,t))),z*.7);o.rgb+=(R(outTexCoord*res+t*17.)-.5)*(.05+I*.1);gl_FragColor=o;}`;
 
 // Property and method names are two letters to fit the size limit (the minifier
 // cannot shorten them). What each one means:
@@ -1498,7 +1450,7 @@ class Storm {
     });
   }
 
-  sr(power = Phaser.Math.FloatBetween(0.6, 1)) {
+  sr(power = 0.6 + random() * 0.4) {
     const bolt = () => this.db(between(40, SCREEN_W - 40));
     bolt();
     this.lv = power;
@@ -1507,7 +1459,7 @@ class Storm {
       this.lv = power;
       bolt();
     });
-    thunder(Phaser.Math.FloatBetween(0.15, 1.4), power);
+    thunder(0.15 + random() * 1.25, power);
     if (this.ot) this.ot(power);
   }
 
@@ -1565,6 +1517,52 @@ class BootScene extends Phaser.Scene {
 const TOOLS = ['flashlight', 'crowbar', 'umbrella', 'revolver'];
 const TOOL_NAMES = { flashlight: 'LINTERNA', crowbar: 'PATA DE CABRA', umbrella: 'PARAGUAS', revolver: 'REVOLVER' };
 
+// The controls, shown rather than told: what the child does, then the button
+// that does it. Shared by the title and pause screens.
+function controlsLegend(scene) {
+  const mid = SCREEN_W / 2;
+  const img = (x, y, key, frame) => image(scene, x, y, key, 21, 0.5, 0.5, frame).setScale(2);
+  const gfx = scene.add.graphics().setDepth(21);
+  [
+    ['MOVER', 'JOYSTICK', (x, y) => scene.add.sprite(x, y, 'child').setScale(2).setDepth(21).play('child-run')],
+    [
+      'USAR',
+      'BTN 2',
+      (x, y) => {
+        image(scene, x + 10, y, 'cone', 20, 0, 0.5).setScale(0.2).setAlpha(0.5);
+        img(x - 12, y, 'child', 0);
+        img(x + 4, y + 4, 'tool_flashlight');
+      },
+    ],
+    [
+      'SALTAR / PLANEAR',
+      'BTN 1',
+      (x, y) => {
+        img(x, y + 4, 'child', 4);
+        img(x, y - 30, 'umbrella_open');
+      },
+    ],
+    ['CAMBIAR', 'BTN 5 / 6', (x, y) => TOOLS.slice(0, 3).forEach((t, i) => img(x + (i - 1) * 30, y + 6, 'tool_' + t))],
+    [
+      'APUNTAR',
+      'BTN 2 Y JOYSTICK',
+      (x, y) => {
+        img(x - 12, y, 'child', 0);
+        img(x + 14, y - 22, 'reticle').setRotation(-PI / 4);
+      },
+    ],
+  ].forEach(([act, btn, icon], i) => {
+    const x = mid + (i - 2) * 124;
+    icon(x, 214);
+    label(scene, x, 250, act).setDepth(21);
+    gfx.fillStyle(0x4a4a4a).fillRect(x - 13, 276, 26, 6);
+    if (i) gfx.fillStyle(0xc00010).fillRect(x - 8, 268, 16, 8).fillStyle(0xff1a1a).fillRect(x - 6, 266, 12, 4);
+    else gfx.fillStyle(0x9a9a9a).fillRect(x, 264, 3, 12).fillStyle(0xff1a1a).fillRect(x - 3, 259, 9, 8);
+    label(scene, x, 292, btn, 0x8c8c8c).setDepth(21);
+  });
+  label(scene, mid, 314, 'ABAJOX2: BAJAR VIGAS   PINTURA AMARILLA: SE ROMPE   BTN 4: SILENCIAR', 0x6a6a6a).setDepth(21);
+}
+
 class TitleScene extends Phaser.Scene {
   constructor() {
     super('Title');
@@ -1591,47 +1589,7 @@ class TitleScene extends Phaser.Scene {
     this.ts = image(this, mid + 3, 98, 'logo', 20).setScale(LOGO_SCALE).setTintFill(0xb00010);
     this.tt = image(this, mid, 96, 'logo', 21).setScale(LOGO_SCALE);
     label(this, mid, 150, 'UNA TORMENTA SOBRE LOS LLANOS', 0x8c8c8c).setDepth(21);
-    // Controls, shown rather than told: what the child does, then the button that does it.
-    const img = (x, y, key, frame) => image(this, x, y, key, 21, 0.5, 0.5, frame).setScale(2);
-    const gfx = this.add.graphics().setDepth(21);
-    [
-      ['MOVER', 'JOYSTICK', (x, y) => this.add.sprite(x, y, 'child').setScale(2).setDepth(21).play('child-run')],
-      [
-        'USAR',
-        'BTN 2',
-        (x, y) => {
-          image(this, x + 10, y, 'cone', 20, 0, 0.5).setScale(0.2).setAlpha(0.5);
-          img(x - 12, y, 'child', 0);
-          img(x + 4, y + 4, 'tool_flashlight');
-        },
-      ],
-      [
-        'SALTAR / PLANEAR',
-        'BTN 1',
-        (x, y) => {
-          img(x, y + 4, 'child', 4);
-          img(x, y - 30, 'umbrella_open');
-        },
-      ],
-      ['CAMBIAR', 'BTN 5 / 6', (x, y) => TOOLS.slice(0, 3).forEach((t, i) => img(x + (i - 1) * 30, y + 6, 'tool_' + t))],
-      [
-        'APUNTAR',
-        'BTN 2 Y JOYSTICK',
-        (x, y) => {
-          img(x - 12, y, 'child', 0);
-          img(x + 14, y - 22, 'reticle').setRotation(-PI / 4);
-        },
-      ],
-    ].forEach(([act, btn, icon], i) => {
-      const x = mid + (i - 2) * 124;
-      icon(x, 214);
-      label(this, x, 250, act).setDepth(21);
-      gfx.fillStyle(0x4a4a4a).fillRect(x - 13, 276, 26, 6);
-      if (i) gfx.fillStyle(0xc00010).fillRect(x - 8, 268, 16, 8).fillStyle(0xff1a1a).fillRect(x - 6, 266, 12, 4);
-      else gfx.fillStyle(0x9a9a9a).fillRect(x, 264, 3, 12).fillStyle(0xff1a1a).fillRect(x - 3, 259, 9, 8);
-      label(this, x, 292, btn, 0x8c8c8c).setDepth(21);
-    });
-    label(this, mid, 314, '   BTN 4: SILENCIAR   ', 0x6a6a6a).setDepth(21);
+    controlsLegend(this);
     this.pr = label(this, mid, 344, 'PULSA START', 0xffffff, 2).setDepth(21);
 
     const start = () => {
@@ -1661,6 +1619,30 @@ class TitleScene extends Phaser.Scene {
     this.tt.x = mid + jitter;
     this.ts.x = mid + 3 - jitter * 1.5 + (random() < 0.05 ? 8 : 0);
     for (const e of this.ey) e.setAlpha(0.6 + random() * 0.4 + this.st.lv);
+  }
+}
+
+// START toggles the game between running and frozen, over a screen that repeats
+// the title's legend so the controls are always a button away.
+class PauseScene extends Phaser.Scene {
+  constructor() {
+    super('Pause');
+  }
+
+  create() {
+    this.add.rectangle(0, 0, SCREEN_W, SCREEN_H, 0x000000, 0.85).setOrigin(0).setScrollFactor(0);
+    controlsLegend(this);
+    this.pr = label(this, SCREEN_W / 2, 348, 'PAUSA', 0xffffff, 3).setDepth(21);
+  }
+
+  update(time) {
+    this.pr.setAlpha(floor(time / 500) % 2 ? 0.35 : 1);
+    if (tap('START1') || tap('START2')) {
+      clearTaps();
+      this.scene.resume('Game');
+      this.scene.resume('Hud');
+      this.scene.stop();
+    }
   }
 }
 
@@ -1986,7 +1968,10 @@ class GameScene extends Phaser.Scene {
     this.dk = this.add.renderTexture(0, 0, SCREEN_W, SCREEN_H).setOrigin(0).setScrollFactor(0).setDepth(50);
     // Additive glow under the darkness so light visibly lights the rain and stone.
     this.cn = image(this, 0, 0, 'cone', 45, 0, 0.5).setBlendMode(1).setVisible(false);
-    this.ag = image(this, 0, 0, 'light', 45).setBlendMode(1).setAlpha(0.05).setScale(0.8);
+    this.ag = image(this, 0, 0, 'light', 45).setBlendMode(1).setAlpha(0.06).setScale(0.8);
+    // Soft dark pool that follows the child and fades to nothing at its rim,
+    // so the scenery never competes with him. Sits under the bricks (depth 0).
+    this.au = image(this, 0, 0, 'light', -0.4).setTint(0x000000).setScale(3);
     this.ds = this.add.graphics().setDepth(61);
   }
 
@@ -2575,7 +2560,10 @@ class GameScene extends Phaser.Scene {
     dark.fill(0, max(0.32, BASE_DARK * (this.bs ? 0.6 : 1) * (1 - 0.93 * min(1, flash * 1.4))));
 
     const p = this.pl;
-    if (!this.dd) light(p.x, p.y - 12, 74);
+    // The dark pool hides the scenery around the child; only a tight reveal
+    // at his feet lets him (and the bricks under him) read through.
+    this.au.setPosition(p.x, p.y - 10).setVisible(!this.dd);
+    if (!this.dd) light(p.x, p.y - 12, 80);
     this.ag.setPosition(p.x, p.y - 12).setVisible(!this.dd);
     for (const l of this.lh) {
       const f = l.fl ? 0.9 + sin(time / 90 + l.x) * 0.05 + random() * 0.05 : 1;
@@ -2848,6 +2836,14 @@ class GameScene extends Phaser.Scene {
     const dt = min(delta, 50) / 1000;
     const cam = this.cm;
 
+    // START freezes the world; the Pause scene resumes it on the next press.
+    if (tap('START1') || tap('START2')) {
+      this.scene.launch('Pause');
+      this.scene.pause();
+      this.scene.pause('Hud');
+      return;
+    }
+
     this.ut(dt, time);
     this.ul(dt, time);
     // Dread: the picture breaks up as monsters close in, and a little when empty-handed.
@@ -2857,7 +2853,7 @@ class GameScene extends Phaser.Scene {
       m.br = max(0, m.br - dt);
       if (m.tl) this.us(m, dt, time);
       else this.ua(m, dt, time);
-      nearest = min(nearest, Phaser.Math.Distance.Between(m.x, m.y, this.pl.x, this.pl.y));
+      nearest = min(nearest, hypot(m.x - this.pl.x, m.y - this.pl.y));
     }
     this.gl.bj = 0.04 + max(0, 1 - nearest / 140) * 0.14 + (this.eq ? 0 : 0.03);
     this.ub(time);
@@ -2973,7 +2969,7 @@ class HudScene extends Phaser.Scene {
     this.tb.setText(g.eq ? TOOL_NAMES[g.eq] : 'MANOS VACIAS').setTint(g.eq ? 0xffffff : 0xff3b3b);
 
     // Fade the panel out once the linger window lapses.
-    this.pn.alpha = Phaser.Math.Linear(this.pn.alpha, time < this.ha ? 1 : 0, min(1, delta / 160));
+    this.pn.alpha += ((time < this.ha ? 1 : 0) - this.pn.alpha) * min(1, delta / 160);
   }
 }
 
@@ -2994,6 +2990,6 @@ new Phaser.Game({
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
-  scene: [BootScene, TitleScene, GameScene, HudScene],
+  scene: [BootScene, TitleScene, GameScene, HudScene, PauseScene],
 });
 })();
