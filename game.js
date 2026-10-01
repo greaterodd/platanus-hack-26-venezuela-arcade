@@ -731,8 +731,8 @@ function makeArt(scene) {
   makeProps();
   makeLights();
   makeBackdrops();
-  makeLogo();
   makeFont(scene);
+  makeLogo();
   makeFx();
 }
 
@@ -898,6 +898,11 @@ function makeLights() {
   });
 }
 
+// 5x7 pixel font, one base-32 digit per row; drawn 2px wide for chunky 8-bit stems.
+const FONT_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,!?&-:/() Ñ¡¿';
+const FONT =
+  'ehhvhhhuhhuhhuehgggheuhhhhhuvgguggvvggugggehgjhhehhhvhhhe44444e1111hhehikokihggggggvhrrhhhhhppljjhehhhhheuhhugggehhhliduhhukihehge1hev444444hhhhhhehhhhaa4hhhhrrhhha4ahhhha4444v1248gvehjlphe4c4444eeh168gveh161he26aiv22vgu11heegguhhev124444ehhehheehhf11e000008800004484444404eh124048kk8lid000e000044044011248gg248884284222480000000ehpljhh40444444048ghe';
+
 // Title logo letters: brush strokes [x1, y1, x2, y2, ...] on a 4x6 grid, heavy at the start, thin at the tip.
 const O = [0, 0, 0, 6, 0, 0, 4, -0.3, 4, 0, 4, 6, 0, 6, 4, 5.7];
 const GLYPHS = {
@@ -911,23 +916,18 @@ const GLYPHS = {
   N: [0, 0, 0, 6, 0, 0, 4, 6, 4, 0, 4, 6],
 };
 
-// Brush logo: slanted tapering strokes in the two blood reds, white rim.
+// Brush logo: slanted tapering strokes, blood red with a white rim. Drawn small with
+// hard edges and shown at LOGO_SCALE, so it is as chunky as the rest of the art.
+const LOGO_SCALE = 3;
 function makeLogo() {
-  fromCanvas('logo', 480, 150, () => {
-    pen.lineJoin = 'round';
+  fromCanvas('logo', 160, 50, () => {
     const word = (text, x, y, u, sw) => {
-      const face = gradient(pen.createLinearGradient(0, -sw / 2, 0, u * 6 + sw / 2), 0, 'r', 1, 'c');
-      // drop shadow, white rim, dark keyline, blood-red face
-      [
-        [8, 'k', 4],
-        [8, 'w', 0],
-        [3, 'k', 0],
-        [0, face, 0],
-      ].forEach(([lw, style, off]) => {
+      // white rim, then the red face
+      for (const lw of [2, 0]) {
         pen.lineWidth = lw;
-        ink(style);
+        ink(lw ? 'w' : 'r');
         [...text].forEach((ch, i) => {
-          pen.setTransform(1, 0, -0.3, 1, x + i * (u * 5 + sw) + off, y + off);
+          pen.setTransform(1, 0, -0.3, 1, x + i * (u * 5 + sw), y);
           const g = GLYPHS[ch];
           for (let k = 0; k < g.length; k += 4) {
             const [ax, ay, bx, by] = g.slice(k, k + 4).map((v) => v * u);
@@ -940,17 +940,16 @@ function makeLogo() {
             lw ? pen.stroke(stroke) : pen.fill(stroke);
           }
         });
-      });
+      }
     };
-    word('EL', 214, 14, 5, 8);
-    word('APAGoN', 56, 64, 11, 15);
+    word('EL', 71, 5, 1.7, 2.7);
+    word('APAGoN', 19, 21, 3.7, 5);
+    // No soft edges: every pixel is either there or not.
+    const img = pen.getImageData(0, 0, 160, 50);
+    for (let i = 3; i < img.data.length; i += 4) img.data[i] = img.data[i] > 127 ? 255 : 0;
+    pen.putImageData(img, 0, 0);
   });
 }
-
-// 5x7 pixel font, one base-32 digit per row; drawn 2px wide for chunky 8-bit stems.
-const FONT_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,!?&-:/() Ñ¡¿';
-const FONT =
-  'ehhvhhhuhhuhhuehgggheuhhhhhuvgguggvvggugggehgjhhehhhvhhhe44444e1111hhehikokihggggggvhrrhhhhhppljjhehhhhheuhhugggehhhliduhhukihehge1hev444444hhhhhhehhhhaa4hhhhrrhhha4ahhhha4444v1248gvehjlphe4c4444eeh168gveh161he26aiv22vgu11heegguhhev124444ehhehheehhf11e000008800004484444404eh124048kk8lid000e000044044011248gg248884284222480000000ehpljhh40444444048ghe';
 
 function makeFont(scene) {
   fromCanvas('font', FONT_CHARS.length * 8, 8, () => {
@@ -1453,8 +1452,8 @@ class TitleScene extends Phaser.Scene {
     image(this, mid + 150, ground, 'shade', 8, 0.5, 1, 1).setScale(2).setAlpha(0.8).setFlipX(true);
     this.ey = [mid - 118, mid + 148].map((x) => image(this, x, ground - 55, 'eyes', 12).setScale(2));
 
-    this.ts = image(this, mid + 3, 98, 'logo', 20).setTintFill(0xb00010);
-    this.tt = image(this, mid, 96, 'logo', 21);
+    this.ts = image(this, mid + 3, 98, 'logo', 20).setScale(LOGO_SCALE).setTintFill(0xb00010);
+    this.tt = image(this, mid, 96, 'logo', 21).setScale(LOGO_SCALE);
     // Controls, shown rather than told: what the child does, then the button that does it.
     const img = (x, y, key, frame) => image(this, x, y, key, 21, 0.5, 0.5, frame).setScale(2);
     const gfx = this.add.graphics().setDepth(21);
@@ -1495,7 +1494,7 @@ class TitleScene extends Phaser.Scene {
       else gfx.fillStyle(0x9a9a9a).fillRect(x, 264, 3, 12).fillStyle(0xff1a1a).fillRect(x - 3, 259, 9, 8);
       label(this, x, 292, btn, 0x8c8c8c).setDepth(21);
     });
-    label(this, mid, 314, 'ABAJOX2: BAJAR VIGAS   PINTURA AMARILLA: SE ROMPE   BTN 4: SILENCIAR', 0x6a6a6a).setDepth(21);
+    label(this, mid, 314, '   BTN 4: SILENCIAR   ', 0x6a6a6a).setDepth(21);
     this.pr = label(this, mid, 344, 'PULSA START', 0xffffff, 2).setDepth(21);
 
     const start = () => {
