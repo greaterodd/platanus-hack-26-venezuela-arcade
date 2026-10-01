@@ -879,6 +879,55 @@ function makeProps(scene) {
     c.lineCap = 'round';
     drawTree(c, 35, 112, 38, 7, rng(3));
   });
+  // The child's cabin: dark planks, a lit window and a stooped roof.
+  fromCanvas(scene, 'house', 60, 54, (c) => {
+    c.fillStyle = '#080604';
+    c.fillRect(6, 22, 48, 32);
+    c.fillStyle = '#241a10';
+    c.fillRect(8, 24, 44, 28);
+    c.fillStyle = '#160f08';
+    for (let y = 28; y < 52; y += 4) c.fillRect(8, y, 44, 1);
+    c.fillStyle = '#080604';
+    c.beginPath();
+    c.moveTo(0, 24);
+    c.lineTo(30, 4);
+    c.lineTo(60, 24);
+    c.closePath();
+    c.fill();
+    c.fillStyle = '#2c2218';
+    c.beginPath();
+    c.moveTo(5, 22);
+    c.lineTo(30, 8);
+    c.lineTo(55, 22);
+    c.closePath();
+    c.fill();
+    c.fillStyle = '#18110a';
+    for (let i = 1; i < 5; i++) c.fillRect(30 - i * 6, 8 + i * 3, i * 12, 1);
+    c.fillStyle = '#080604';
+    c.fillRect(22, 34, 14, 20);
+    c.fillStyle = '#3a2a18';
+    c.fillRect(23, 35, 12, 19);
+    c.fillStyle = '#f2c230';
+    c.fillRect(33, 44, 1, 1);
+    c.fillStyle = '#080604';
+    c.fillRect(39, 28, 14, 12);
+    c.fillStyle = '#e0a030';
+    c.fillRect(40, 29, 12, 10);
+    c.fillStyle = '#2a1a08';
+    c.fillRect(45, 29, 1, 10);
+    c.fillRect(40, 33, 12, 1);
+  });
+  fromCanvas(scene, 'fence', 32, 18, (c) => {
+    c.fillStyle = '#0c0a08';
+    c.fillRect(0, 4, 32, 2);
+    c.fillRect(0, 11, 32, 2);
+    for (const x of [2, 10, 18, 26]) {
+      c.fillRect(x, 0, 3, 18);
+      c.fillStyle = '#2a2018';
+      c.fillRect(x + 1, 0, 1, 18);
+      c.fillStyle = '#0c0a08';
+    }
+  });
   fromCanvas(scene, 'scrub', 26, 12, (c) => {
     const r = rng(17);
     c.lineWidth = 1;
@@ -1219,6 +1268,72 @@ function makeBackdrops(scene) {
       c.stroke();
     }
   });
+
+  // Far forest: pale trunks drowned in fog, so the woods read as deep and cold.
+  fromCanvas(scene, 'forestfar', 640, 480, (c) => {
+    const r = rng(41);
+    const g = c.createLinearGradient(0, 0, 0, 480);
+    g.addColorStop(0, 'rgba(44,48,58,0)');
+    g.addColorStop(0.55, 'rgba(52,56,66,0.28)');
+    g.addColorStop(1, 'rgba(66,70,80,0.5)');
+    c.fillStyle = g;
+    c.fillRect(0, 0, 640, 480);
+    for (let x = 0; x < 640; x += 10 + r() * 16) {
+      const w = 2 + r() * 4;
+      const h = 150 + r() * 240;
+      c.fillStyle = `rgba(${(78 + r() * 22) | 0},${(82 + r() * 22) | 0},${(92 + r() * 22) | 0},0.55)`;
+      c.fillRect(x, 480 - h, w, h);
+      for (let i = 0; i < 3; i++) c.fillRect(x - w, 480 - h + i * 22, w * 3, 1);
+    }
+  });
+
+  // Mid forest: tall dark trunks with roots and hanging limbs.
+  fromCanvas(scene, 'forestmid', 640, 480, (c) => {
+    const r = rng(53);
+    for (let x = -20; x < 660; x += 62 + r() * 70) {
+      const w = 10 + r() * 16;
+      c.fillStyle = '#0b0b0e';
+      c.fillRect(x, 0, w, 480);
+      c.fillStyle = '#15151a';
+      c.fillRect(x + 2, 0, 2, 480);
+      c.beginPath();
+      c.moveTo(x, 480);
+      c.lineTo(x - 9, 480);
+      c.lineTo(x + 2, 436);
+      c.closePath();
+      c.fill();
+      c.beginPath();
+      c.moveTo(x + w, 480);
+      c.lineTo(x + w + 9, 480);
+      c.lineTo(x + w - 2, 436);
+      c.closePath();
+      c.fill();
+      for (let i = 0; i < 4; i++) c.fillRect(x + r() * w, 0, 2, 40 + r() * 90);
+    }
+    c.fillStyle = '#0b0b0e';
+    c.fillRect(0, 0, 640, 12);
+  });
+
+  // Foreground trunks that sweep in front of the camera (Blasphemous columns).
+  fromCanvas(scene, 'foretrees', 320, 480, (c) => {
+    const r = rng(67);
+    for (let i = 0; i < 2; i++) {
+      const x = 40 + i * 180 + r() * 40;
+      const w = 18 + r() * 16;
+      c.fillStyle = '#030303';
+      c.fillRect(x, 0, w, 480);
+      for (let j = 0; j < 7; j++) {
+        const y = 20 + r() * 300;
+        const len = 40 + r() * 90;
+        c.fillRect(r() > 0.5 ? x + w : x - len, y, len, 4 + r() * 4);
+      }
+      for (let j = 0; j < 9; j++) {
+        c.beginPath();
+        c.arc(x + w / 2 + (r() - 0.5) * 90, 12 + r() * 44, 10 + r() * 20, 0, Math.PI * 2);
+        c.fill();
+      }
+    }
+  });
 }
 
 function makeFx(scene) {
@@ -1289,7 +1404,8 @@ function makeFx(scene) {
 // (the top of the ground under it), so its feet are at y * 16.
 
 const T = 16;
-const W = 150;
+const OX = 56; // tiles of intro forest prepended before the old world
+const W = 150 + OX;
 const H = 40;
 
 const EMPTY = 0;
@@ -1313,11 +1429,6 @@ function buildWorld() {
   const spikes = (x1, x2, y, abyss = false) => {
     for (let x = x1; x <= x2; x++) e('spikes', x, y, { abyss });
   };
-
-  // World shell
-  fill(0, 0, 1, H - 1);
-  fill(W - 2, 0, W - 1, H - 1);
-  fill(0, H - 2, W - 1, H - 1);
 
   // Llanos flatlands: dry earth, leafless trees and low scrub.
   fill(2, 26, 33, 37);
@@ -1434,6 +1545,50 @@ function buildWorld() {
   e('pillar', 140, 2, { h: 14 });
   e('candelabra', 132, 9);
   e('bell', 117, 2);
+
+  // Slide the whole built world right, leaving the forest in front of it.
+  for (let y = 0; y < H; y++) {
+    for (let x = W - 1; x >= OX; x--) {
+      grid[y][x] = grid[y][x - OX];
+      interior[y][x] = interior[y][x - OX];
+    }
+    for (let x = 0; x < OX + 2; x++) {
+      grid[y][x] = EMPTY;
+      interior[y][x] = 0;
+    }
+  }
+  for (const ent of ents) ent.x += OX;
+
+  // World shell
+  fill(0, 0, 1, H - 1);
+  fill(W - 2, 0, W - 1, H - 1);
+  fill(0, H - 2, W - 1, H - 1);
+
+  // Intro forest: the child leaves the house and walks east toward the llanos.
+  const pi = ents.findIndex((o) => o.type === 'player');
+  if (pi >= 0) ents.splice(pi, 1);
+  fill(2, 26, 57, 37); // forest floor
+  e('player', 9, 26);
+  e('house', 6, 26);
+  e('shrine', 12, 26, { lit: true });
+  e('fence', 15, 26);
+  e('fence', 17, 26);
+  e('tree', 20, 26, { scale: 1.1 });
+  e('tree', 25, 26, { flip: true });
+  e('tree', 30, 26, { scale: 1.25 });
+  e('tree', 35, 26, { flip: true, scale: 0.95 });
+  e('tree', 41, 26, { scale: 1.15 });
+  e('tree', 46, 26, { flip: true });
+  e('tree', 51, 26, { scale: 1.2 });
+  e('tree', 56, 26, { flip: true });
+  e('scrub', 22, 26);
+  e('scrub', 33, 26);
+  e('scrub', 44, 26);
+  e('scrub', 54, 26);
+  e('foresteyes', 19, 24);
+  e('foresteyes', 28, 25);
+  e('foresteyes', 38, 23);
+  e('foresteyes', 49, 24);
 
   return { grid, interior, ents };
 }
@@ -1813,13 +1968,16 @@ class GameScene extends Phaser.Scene {
     cam.setBounds(0, 0, W * T, H * T);
     cam.startFollow(this.player, true, 0.12, 0.12, 0, 30);
 
-    this.time.delayedCall(900, () => this.hint('start', 'STICK move \u00b7 BUTTON 2 jump \u00b7 your FLASHLIGHT burns what hides in the dark'));
+    this.time.delayedCall(900, () => this.hint('start', 'You step out of the house. Head east through the forest \u2014 the llanos lie beyond.'));
   }
 
   buildBackdrop() {
     const { width, height } = this.scale;
     this.hills = this.add.tileSprite(0, 0, width, height, 'hills').setOrigin(0).setScrollFactor(0).setDepth(-22);
     this.grove = this.add.tileSprite(0, 0, width, height, 'grove').setOrigin(0).setScrollFactor(0).setDepth(-21);
+    this.forestFar = this.add.tileSprite(0, 0, width, height, 'forestfar').setOrigin(0).setScrollFactor(0).setDepth(-25);
+    this.forestMid = this.add.tileSprite(0, 0, width, height, 'forestmid').setOrigin(0).setScrollFactor(0).setDepth(-24);
+    this.foreTrees = this.add.tileSprite(0, 0, width, height, 'foretrees').setOrigin(0).setScrollFactor(0).setDepth(60);
   }
 
   buildTilemaps() {
@@ -1944,8 +2102,27 @@ class GameScene extends Phaser.Scene {
           break;
         }
         case 'tree':
-          this.add.image(px, py + 2, 'tree').setOrigin(0.5, 1).setDepth(-3).setFlipX(!!ent.flip);
+          this.add.image(px, py + 2, 'tree').setOrigin(0.5, 1).setDepth(-3).setFlipX(!!ent.flip).setScale(ent.scale || 1);
           break;
+        case 'house':
+          this.add.image(px, py + 2, 'house').setOrigin(0.5, 1).setDepth(-1);
+          this.lights.push({ x: px + 16, y: py - 19, r: 64, flicker: true });
+          break;
+        case 'fence':
+          this.add.image(px, py + 1, 'fence').setOrigin(0.5, 1).setDepth(-2);
+          break;
+        case 'foresteyes': {
+          const ey = this.add.image(px, py, 'eyes').setDepth(-5).setScale(1.4).setAlpha(0.5);
+          this.tweens.add({
+            targets: ey,
+            alpha: { from: 0.12, to: 0.85 },
+            duration: 1600 + Math.random() * 1400,
+            yoyo: true,
+            repeat: -1,
+            delay: Math.random() * 2000,
+          });
+          break;
+        }
         case 'grave':
         case 'cross':
           this.add.image(px, py + 1, ent.type).setOrigin(0.5, 1).setDepth(-2);
@@ -2675,14 +2852,14 @@ class GameScene extends Phaser.Scene {
       }
     }
 
-    if (p.x > 27 * T && p.x < 34 * T) this.hint('veil', 'A veil of living shadow. Shine the flashlight on it.');
-    if (p.x > 84 * T && p.x < 90 * T && p.y < 12 * T && !this.found.has('umbrella')) {
+    if (p.x > 83 * T && p.x < 90 * T) this.hint('veil', 'A veil of living shadow. Shine the flashlight on it.');
+    if (p.x > 140 * T && p.x < 146 * T && p.y < 12 * T && !this.found.has('umbrella')) {
       this.hint('chasm', 'Too far to jump... if only something could slow the fall.', 4000);
     }
-    if (this.found.has('crowbar') && p.x > 40 * T && p.x < 48 * T && p.y > 20 * T && p.y < 27 * T && this.cracked.has('45,26')) {
+    if (this.found.has('crowbar') && p.x > 96 * T && p.x < 104 * T && p.y > 20 * T && p.y < 27 * T && this.cracked.has('101,26')) {
       this.hint('floor', 'The floor here is cracked...');
     }
-    if (p.x < 130 * T && p.x > 110 * T && p.y < 9 * T) this.hint('bell', 'The great bell. Ring it.');
+    if (p.x < 186 * T && p.x > 166 * T && p.y < 9 * T) this.hint('bell', 'The great bell. Ring it.');
 
     if (this.bellZone && !this.won && this.bellZone.contains(p.x, p.y - 10)) this.win();
   }
@@ -2782,10 +2959,23 @@ class GameScene extends Phaser.Scene {
 
   updateParallax() {
     const cam = this.cameras.main;
+    // Cross-fade the woods into the open llanos as the child walks east.
+    const forest = 1 - Phaser.Math.Clamp((this.player.x - 52 * T) / (14 * T), 0, 1);
+    this.forestFar.tilePositionX = cam.scrollX * 0.18;
+    this.forestFar.y = 10 - cam.scrollY * 0.06;
+    this.forestMid.tilePositionX = cam.scrollX * 0.5;
+    this.forestMid.y = 18 - cam.scrollY * 0.14;
+    this.foreTrees.tilePositionX = cam.scrollX * 1.35;
+    this.foreTrees.y = -cam.scrollY * 0.25;
+    this.forestFar.setAlpha(forest);
+    this.forestMid.setAlpha(forest);
+    this.foreTrees.setAlpha(forest);
     this.hills.tilePositionX = cam.scrollX * 0.1;
     this.hills.y = 10 - cam.scrollY * 0.06;
     this.grove.tilePositionX = cam.scrollX * 0.25;
     this.grove.y = 21 - cam.scrollY * 0.15;
+    this.hills.setAlpha(1 - forest);
+    this.grove.setAlpha(1 - forest);
   }
 
   win() {
