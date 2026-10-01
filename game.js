@@ -2,18 +2,17 @@
 // A child in a yellow raincoat, a storm, a cathedral full of things that hate the light.
 
 // DO NOT replace existing keys — they match the physical arcade cabinet wiring.
-// Extra local testing shortcuts are appended at the end of some arrays.
 const CABINET_KEYS = {
   P1_U: ['w'],
   P1_D: ['s'],
   P1_L: ['a'],
   P1_R: ['d'],
-  P1_1: ['u', ' ', 'z'],
-  P1_2: ['i', 'x'],
-  P1_3: ['o', 'e'],
-  P1_4: ['j', 'q'],
+  P1_1: ['u'],
+  P1_2: ['i'],
+  P1_3: ['o'],
+  P1_4: ['j'],
   P1_5: ['k'],
-  P1_6: ['l', 'm'],
+  P1_6: ['l'],
   P2_U: ['ArrowUp'],
   P2_D: ['ArrowDown'],
   P2_L: ['ArrowLeft'],
