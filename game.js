@@ -2836,9 +2836,6 @@ class GameScene extends Phaser.Scene {
     if (this.found.has('crowbar') && p.x > 40 * T && p.x < 48 * T && p.y > 20 * T && p.y < 27 * T && this.cracked.has('45,26')) {
       this.hint('floor', 'El piso aqui esta agrietado...');
     }
-    if (grounded && p.x > 85 * T && p.x < 88 * T && p.y > 26 * T && p.y < 28 * T) {
-      this.hint('beam', 'Vigas de madera... pulsa ABAJO dos veces para bajar.');
-    }
     if (p.x < 130 * T && p.x > 110 * T && p.y < 9 * T) this.hint('bell', 'La gran campana. Hazla sonar.');
     if (this.aiming) this.hint('freeaim', 'APUNTADO LIBRE - manten BOTON 3 y apunta con el joystick.', 3000);
 
