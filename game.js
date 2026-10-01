@@ -68,12 +68,12 @@ const BTN = {
   right: ['P1_R'],
   up: ['P1_U'],
   down: ['P1_D'],
-  jump: ['P1_2', 'P1_U'],
-  use: ['P1_1'],
-  next: ['P1_3'],
+  jump: ['P1_1'],
+  use: ['P1_2'],
+  aim: ['P1_3'],
   prev: ['P1_4'],
-  mute: ['P1_5'],
-  aim: ['P1_6'],
+  next: ['P1_5'],
+  mute: ['P1_6'],
 };
 
 const midi = (m) => 440 * Math.pow(2, (m - 69) / 12);
@@ -1669,7 +1669,7 @@ class TitleScene extends Phaser.Scene {
       this,
       width / 2,
       244,
-      'STICK  MOVE      BUTTON 1  USE TOOL (HOLD: FOCUS FLASHLIGHT)\n\nBUTTON 2  JUMP / HOLD TO GLIDE      BUTTON 3 / 4  SWITCH TOOL\n\nBUTTON 6 & STICK  FREE AIM      BUTTON 5  MUTE\n\nGET HIT AND YOU DROP YOUR TOOL - GRAB IT BACK BEFORE IT FADES.',
+      'STICK  MOVE      BUTTON 1  JUMP / HOLD TO GLIDE\n\nBUTTON 2  USE TOOL (HOLD: FOCUS FLASHLIGHT)      BUTTON 3 & STICK  FREE AIM\n\nBUTTON 4 / 5  SWITCH TOOL      BUTTON 6  MUTE\n\nGET HIT AND YOU DROP YOUR TOOL - GRAB IT BACK BEFORE IT FADES.',
       0x9a9a9a,
     ).setDepth(21);
     this.prompt = label(this, width / 2, 326, 'PRESS START', 0xffffff, 2).setDepth(21);
@@ -1764,7 +1764,7 @@ class GameScene extends Phaser.Scene {
     cam.setBounds(0, 0, W * T, H * T);
     cam.startFollow(this.player, true, 0.12, 0.12, 0, 30);
 
-    this.time.delayedCall(900, () => this.hint('start', 'STICK move - BUTTON 2 jump - your FLASHLIGHT burns what hides in the dark'));
+    this.time.delayedCall(900, () => this.hint('start', 'STICK move - BUTTON 1 jump - your FLASHLIGHT burns what hides in the dark'));
   }
 
   buildBackdrop() {
@@ -2154,8 +2154,8 @@ class GameScene extends Phaser.Scene {
     if (first) {
       audio.play('newtool');
       this.glitch.hit(0.4);
-      if (tool === 'crowbar') this.message('CROWBAR - press BUTTON 1 to swing. Cracked stone gives way.', 5000);
-      if (tool === 'umbrella') this.message('UMBRELLA - hold BUTTON 2 while falling to glide.', 5000);
+      if (tool === 'crowbar') this.message('CROWBAR - press BUTTON 2 to swing. Cracked stone gives way.', 5000);
+      if (tool === 'umbrella') this.message('UMBRELLA - hold BUTTON 1 while falling to glide.', 5000);
     } else {
       audio.play('pickup');
       this.message(`Got your ${TOOL_NAMES[tool]} back.`, 1800);
@@ -2356,7 +2356,7 @@ class GameScene extends Phaser.Scene {
       if (Math.random() < 0.2) this.glitchFx.emitParticleAt(v.rect.centerX, Phaser.Math.Between(v.rect.top, v.rect.bottom), 1);
       if (Math.random() < 0.05) audio.play('burn');
       if (v.strength <= 0) this.dissolveVeil(v);
-      else this.hint('veil-focus', 'It recoils from the light... hold BUTTON 1 to focus the beam.');
+      else this.hint('veil-focus', 'It recoils from the light... hold BUTTON 2 to focus the beam.');
     }
   }
 
@@ -2578,7 +2578,7 @@ class GameScene extends Phaser.Scene {
     const dn = down(...BTN.down);
     const grounded = p.body.blocked.down;
 
-    // Free aim: hold BUTTON 6 (L) and steer with the stick. The stick drives the
+    // Free aim: hold BUTTON 3 (O) and steer with the stick. The stick drives the
     // reticle instead of movement, so the child plants their feet while aiming.
     const hx = (right ? 1 : 0) - (left ? 1 : 0);
     const vy = (dn ? 1 : 0) - (up ? 1 : 0);
@@ -2591,19 +2591,15 @@ class GameScene extends Phaser.Scene {
         this.aim.y = Math.round(Math.sin(q));
         if (this.aim.x) this.facing = this.aim.x;
       }
-      // Up aims instead of jumping while the aim modifier is held.
-      pressed.P1_U = false;
-      released.P1_U = false;
     } else {
       this.aimAngle = this.facing > 0 ? 0 : Math.PI;
       this.aim.x = this.facing;
       this.aim.y = 0;
     }
 
-    const jumpKeys = this.aiming ? ['P1_2'] : BTN.jump;
-    const jumpDown = tap(...jumpKeys);
-    const jumpHeld = down(...jumpKeys);
-    const jumpUp = untap(...jumpKeys);
+    const jumpDown = tap(...BTN.jump);
+    const jumpHeld = down(...BTN.jump);
+    const jumpUp = untap(...BTN.jump);
 
     if (grounded) {
       if (!this.wasGrounded && this.lastVy > 220) audio.play('land');
@@ -2632,7 +2628,7 @@ class GameScene extends Phaser.Scene {
 
     if (tap(...BTN.prev)) this.cycleTool(-1);
     if (tap(...BTN.next)) this.cycleTool(1);
-    if (tap(...BTN.mute)) audio.music.gain.value = audio.music.gain.value > 0 ? 0 : 0.32;
+    if (tap(...BTN.mute)) audio.master.gain.value = audio.master.gain.value > 0 ? 0 : 0.9;
 
     p.setFlipX(this.facing < 0);
     if (!grounded) p.anims.play('child-jump', true);
@@ -2663,7 +2659,7 @@ class GameScene extends Phaser.Scene {
       this.hint('floor', 'The floor here is cracked...');
     }
     if (p.x < 130 * T && p.x > 110 * T && p.y < 9 * T) this.hint('bell', 'The great bell. Ring it.');
-    if (this.aiming) this.hint('freeaim', 'FREE AIM \u2014 keep BUTTON 6 held, steer with the stick to aim your tool.', 3000);
+    if (this.aiming) this.hint('freeaim', 'FREE AIM \u2014 keep BUTTON 3 held, steer with the stick to aim your tool.', 3000);
 
     // Free-aim reticle.
     const dist = 42;
