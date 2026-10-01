@@ -684,6 +684,7 @@ function makeArt(scene) {
   makeLights(scene);
   makeBackdrops(scene);
   makeLogo(scene);
+  makeFont(scene);
   makeFx(scene);
 }
 
@@ -1027,53 +1028,77 @@ function makeLights(scene) {
   });
 }
 
-// Title logo letters: polylines on a 4x6 grid, stroked thick so no font is needed.
+// Title logo letters: brush strokes [x1, y1, x2, y2, ...] on a 4x6 grid, heavy at the start, thin at the tip.
+const O = [0, 0, 0, 6, 0, 0, 4, -0.3, 4, 0, 4, 6, 0, 6, 4, 5.7];
 const GLYPHS = {
-  E: [[4, 0, 0, 0, 0, 6, 4, 6], [0, 3, 3, 3]],
-  L: [[0, 0, 0, 6, 4, 6]],
-  A: [[0, 6, 1.3, 0, 2.7, 0, 4, 6], [0.8, 4, 3.2, 4]],
-  P: [[0, 6, 0, 0, 4, 0, 4, 3.2, 0, 3.2]],
-  G: [[4, 0, 0, 0, 0, 6, 4, 6, 4, 3.2, 2.2, 3.2]],
-  O: [[0, 0, 4, 0, 4, 6, 0, 6, 0, 0, 4, 0]],
-  N: [[0, 6, 0, 0, 4, 6, 4, 0]],
+  E: [0, 0, 0, 6, 0, 0, 4, -0.4, 0, 3, 3, 2.7, 0, 6, 4, 5.6],
+  L: [0, 0, 0, 6, 0, 6, 4, 5.6],
+  A: [2, 0, 0, 6, 2, 0, 4, 6, 0.6, 4, 3.4, 3.7],
+  P: [0, 0, 0, 6, 0, 0, 4, -0.3, 4, 0, 4, 3, 4, 3, 0, 3.3],
+  G: [4, 0, 0, 0.3, 0, 0, 0, 6, 0, 6, 4, 5.7, 4, 6, 4, 3.2, 4, 3.2, 2, 3.4],
+  O,
+  o: [...O, 3.4, -2.8, 1.8, -1.5], // O with acute accent
+  N: [0, 0, 0, 6, 0, 0, 4, 6, 4, 0, 4, 6],
 };
 
-// Arcade-chrome logo: slanted block letters, cool sky above the horizon, fire below.
+// Brush logo: slanted tapering strokes in the two blood reds, white rim.
 function makeLogo(scene) {
   fromCanvas(scene, 'logo', 480, 150, (c) => {
     c.lineJoin = 'round';
     const word = (text, x, y, u, sw) => {
-      const chrome = c.createLinearGradient(0, -sw / 2, 0, u * 6 + sw / 2);
+      const face = c.createLinearGradient(0, -sw / 2, 0, u * 6 + sw / 2);
+      face.addColorStop(0, '#ff1a1a');
+      face.addColorStop(1, '#c00010');
+      // drop shadow, white rim, dark keyline, blood-red face
       [
-        [0, '#2a1590'],
-        [0.32, '#8f7bff'],
-        [0.5, '#ffffff'],
-        [0.5, '#8a0010'],
-        [0.78, '#ff5a1a'],
-        [1, '#ffe14a'],
-      ].forEach(([at, col]) => chrome.addColorStop(at, col));
-      // drop shadow, white rim, dark keyline, chrome face
-      [
-        [sw + 8, '#000', 4],
-        [sw + 8, '#fff', 0],
-        [sw + 3, '#16093f', 0],
-        [sw, chrome, 0],
+        [8, '#000', 4],
+        [8, '#fff', 0],
+        [3, '#000', 0],
+        [0, face, 0],
       ].forEach(([lw, style, off]) => {
         c.lineWidth = lw;
-        c.strokeStyle = style;
+        c.strokeStyle = c.fillStyle = style;
         [...text].forEach((ch, i) => {
-          c.setTransform(1, 0, -0.3, 1, x + i * (u * 4 + sw + u) + off, y + off);
-          for (const line of GLYPHS[ch]) {
+          c.setTransform(1, 0, -0.3, 1, x + i * (u * 5 + sw) + off, y + off);
+          const g = GLYPHS[ch];
+          for (let k = 0; k < g.length; k += 4) {
+            const [ax, ay, bx, by] = g.slice(k, k + 4).map((v) => v * u);
+            const s = sw / 2 / Math.hypot(bx - ax, by - ay);
+            const dx = (bx - ax) * s;
+            const dy = (by - ay) * s;
             c.beginPath();
-            for (let k = 0; k < line.length; k += 2) c.lineTo(line[k] * u, line[k + 1] * u);
-            c.stroke();
+            c.moveTo(ax - dx - dy, ay - dy + dx);
+            c.lineTo(ax - dx + dy, ay - dy - dx);
+            c.lineTo(bx + (dx + dy) * 0.4, by + (dy - dx) * 0.4);
+            c.lineTo(bx + (dx - dy) * 0.4, by + (dy + dx) * 0.4);
+            c.closePath();
+            lw ? c.stroke() : c.fill();
           }
         });
       });
     };
     word('EL', 214, 14, 5, 8);
-    word('APAGON', 56, 64, 11, 15);
+    word('APAGoN', 56, 64, 11, 15);
   });
+}
+
+// 5x7 pixel font, one base-32 digit per row; drawn 2px wide for chunky 8-bit stems.
+const FONT_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,!?&-:/() ';
+const FONT =
+  'ehhvhhhuhhuhhuehgggheuhhhhhuvgguggvvggugggehgjhhehhhvhhhe44444e1111hhehikokihggggggvhrrhhhhhppljjhehhhhheuhhugggehhhliduhhukihehge1hev444444hhhhhhehhhhaa4hhhhrrhhha4ahhhha4444v1248gvehjlphe4c4444eeh168gveh161he26aiv22vgu11heegguhhev124444ehhehheehhf11e000008800004484444404eh124048kk8lid000e000044044011248gg24888428422248';
+
+function makeFont(scene) {
+  fromCanvas(scene, 'font', FONT_CHARS.length * 8, 8, (c) => {
+    c.fillStyle = '#fff';
+    [...FONT].forEach((d, i) => {
+      for (let b = 0; b < 5; b++) if ((parseInt(d, 32) << b) & 16) c.fillRect(((i / 7) | 0) * 8 + b, i % 7, 2, 1);
+    });
+  });
+  scene.cache.bitmapFont.add('font', Phaser.GameObjects.RetroFont.Parse(scene, { image: 'font', width: 8, height: 8, chars: FONT_CHARS }));
+}
+
+function label(scene, x, y, text, tint = 0xffffff, scale = 1) {
+  return scene.add.bitmapText(x, y, 'font', text, 8 * scale, 1).setOrigin(0.5).setTint(tint);
 }
 
 function makeBackdrops(scene) {
@@ -1621,28 +1646,17 @@ class TitleScene extends Phaser.Scene {
       this.add.image(width / 2 + 148, height - 36 - 55, 'eyes').setScale(2).setDepth(12),
     ];
 
-    const serif = 'Georgia, "Times New Roman", serif';
     this.titleShadow = this.add.image(width / 2 + 3, 98, 'logo').setTintFill(0xb00010).setDepth(20);
     this.title = this.add.image(width / 2, 96, 'logo').setDepth(21);
-    this.add
-      .text(width / 2, 186, 'a nocturne in black, white & crimson', { fontFamily: serif, fontSize: '14px', color: '#8c8c8c', fontStyle: 'italic' })
-      .setOrigin(0.5)
-      .setDepth(21);
-
-    this.add
-      .text(
-        width / 2,
-        240,
-        'STICK  move      BUTTON 1  use tool (hold: focus flashlight)\nBUTTON 2  jump / hold to glide      BUTTON 3 / 4  switch tool\n\nGet hit and you drop your tool \u2014 grab it back before it fades.',
-        { fontFamily: 'monospace', fontSize: '11px', color: '#9a9a9a', align: 'center', lineSpacing: 4 },
-      )
-      .setOrigin(0.5)
-      .setDepth(21);
-
-    this.prompt = this.add
-      .text(width / 2, 326, '[ PRESS START ]', { fontFamily: 'monospace', fontSize: '16px', color: '#ffffff' })
-      .setOrigin(0.5)
-      .setDepth(21);
+    label(this, width / 2, 186, 'A NOCTURNE IN BLACK, WHITE & CRIMSON', 0x8c8c8c).setDepth(21);
+    label(
+      this,
+      width / 2,
+      244,
+      'STICK  MOVE      BUTTON 1  USE TOOL (HOLD: FOCUS FLASHLIGHT)\n\nBUTTON 2  JUMP / HOLD TO GLIDE      BUTTON 3 / 4  SWITCH TOOL\n\n\nGET HIT AND YOU DROP YOUR TOOL - GRAB IT BACK BEFORE IT FADES.',
+      0x9a9a9a,
+    ).setDepth(21);
+    this.prompt = label(this, width / 2, 326, 'PRESS START', 0xffffff, 2).setDepth(21);
 
     const start = () => {
       if (this.starting) return;
@@ -1730,7 +1744,7 @@ class GameScene extends Phaser.Scene {
     cam.setBounds(0, 0, W * T, H * T);
     cam.startFollow(this.player, true, 0.12, 0.12, 0, 30);
 
-    this.time.delayedCall(900, () => this.hint('start', 'STICK move \u00b7 BUTTON 2 jump \u00b7 your FLASHLIGHT burns what hides in the dark'));
+    this.time.delayedCall(900, () => this.hint('start', 'STICK move - BUTTON 2 jump - your FLASHLIGHT burns what hides in the dark'));
   }
 
   buildBackdrop() {
@@ -2037,35 +2051,12 @@ class GameScene extends Phaser.Scene {
       this.add.image(width - 86 + i * 28, 16, `tool_${t}`).setScrollFactor(0).setDepth(101),
     );
     this.slotUnknown = TOOLS.map((_, i) =>
-      this.add
-        .text(width - 86 + i * 28, 16, '?', { fontFamily: 'monospace', fontSize: '12px', color: '#555' })
-        .setOrigin(0.5)
-        .setScrollFactor(0)
-        .setDepth(101),
+      label(this, width - 86 + i * 28, 16, '?', 0x555555).setScrollFactor(0).setDepth(101),
     );
-    this.toolLabel = this.add
-      .text(width - 12, 34, '', { fontFamily: 'monospace', fontSize: '10px', color: '#cfcfcf' })
-      .setOrigin(1, 0)
-      .setScrollFactor(0)
-      .setDepth(101);
-    this.msg = this.add
-      .text(width / 2, height - 22, '', {
-        fontFamily: 'monospace',
-        fontSize: '11px',
-        color: '#e8e8e8',
-        backgroundColor: '#000000aa',
-        padding: { x: 6, y: 3 },
-      })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(101)
-      .setAlpha(0);
-    this.bigText = this.add
-      .text(width / 2, height / 2, '', { fontFamily: 'Georgia, serif', fontSize: '34px', color: '#ff1a1a', fontStyle: 'bold' })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(102)
-      .setAlpha(0);
+    this.toolLabel = label(this, width - 12, 34, '').setOrigin(1, 0).setScrollFactor(0).setDepth(101);
+    this.msgBg = this.add.rectangle(0, height - 32, width, 20, 0, 0.67).setOrigin(0).setScrollFactor(0).setDepth(100).setAlpha(0);
+    this.msg = label(this, width / 2, height - 22, '', 0xe8e8e8).setScrollFactor(0).setDepth(101).setAlpha(0);
+    this.bigText = label(this, width / 2, height / 2, '', 0xff1a1a, 4).setScrollFactor(0).setDepth(102).setAlpha(0);
   }
 
   buildInput() {
@@ -2104,9 +2095,9 @@ class GameScene extends Phaser.Scene {
   }
 
   message(text, ms = 3500) {
-    this.msg.setText(text).setAlpha(1);
-    this.tweens.killTweensOf(this.msg);
-    this.tweens.add({ targets: this.msg, alpha: 0, delay: ms, duration: 600 });
+    const both = [this.msg.setText(text.toUpperCase()).setAlpha(1), this.msgBg.setAlpha(1)];
+    this.tweens.killTweensOf(both);
+    this.tweens.add({ targets: both, alpha: 0, delay: ms, duration: 600 });
   }
 
   hint(id, text, ms) {
@@ -2153,8 +2144,8 @@ class GameScene extends Phaser.Scene {
     if (first) {
       audio.play('newtool');
       this.glitch.hit(0.4);
-      if (tool === 'crowbar') this.message('CROWBAR \u2014 press BUTTON 1 to swing. Cracked stone gives way.', 5000);
-      if (tool === 'umbrella') this.message('UMBRELLA \u2014 hold BUTTON 2 while falling to glide.', 5000);
+      if (tool === 'crowbar') this.message('CROWBAR - press BUTTON 1 to swing. Cracked stone gives way.', 5000);
+      if (tool === 'umbrella') this.message('UMBRELLA - hold BUTTON 2 while falling to glide.', 5000);
     } else {
       audio.play('pickup');
       this.message(`Got your ${TOOL_NAMES[tool]} back.`, 1800);
@@ -2723,7 +2714,7 @@ class GameScene extends Phaser.Scene {
       this.slotIcons[i].setAlpha(has ? 1 : dropped.has(t) ? (Math.floor(this.time.now / 150) % 2 ? 0.15 : 0.5) : 0.15);
     });
     this.toolLabel.setText(this.equipped ? TOOL_NAMES[this.equipped] : 'EMPTY HANDS');
-    this.toolLabel.setColor(this.equipped ? '#cfcfcf' : '#ff1a1a');
+    this.toolLabel.setTint(this.equipped ? 0xcfcfcf : 0xff1a1a);
   }
 
   updateDread() {
@@ -2756,11 +2747,11 @@ class GameScene extends Phaser.Scene {
     const white = this.add.rectangle(0, 0, width, height, 0xffffff).setOrigin(0).setScrollFactor(0).setDepth(200).setAlpha(0);
     this.tweens.add({ targets: white, alpha: 1, delay: 2600, duration: 2200 });
     const lines = [
-      this.add.text(width / 2, height / 2 - 22, 'THE BELL TOLLS.', { fontFamily: 'Georgia, serif', fontSize: '32px', color: '#000000', fontStyle: 'bold' }),
-      this.add.text(width / 2, height / 2 + 18, 'the rain forgets you... for now', { fontFamily: 'Georgia, serif', fontSize: '15px', color: '#8a0010', fontStyle: 'italic' }),
+      label(this, width / 2, height / 2 - 22, 'THE BELL TOLLS.', 0, 4),
+      label(this, width / 2, height / 2 + 18, 'THE RAIN FORGETS YOU... FOR NOW', 0x8a0010),
     ];
     lines.forEach((t, i) => {
-      t.setOrigin(0.5).setScrollFactor(0).setDepth(201).setAlpha(0);
+      t.setScrollFactor(0).setDepth(201).setAlpha(0);
       this.tweens.add({ targets: t, alpha: 1, delay: 4800 + i * 1200, duration: 1200 });
     });
     this.time.delayedCall(11000, () => {
