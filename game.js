@@ -1,4 +1,4 @@
-// The Drowned Bell — a gothic-horror metroidvania for the Platanus Hack 26 arcade.
+// El Apagón — a gothic-horror metroidvania for the Platanus Hack 26 arcade.
 
 // DO NOT replace existing keys — they match the physical arcade cabinet wiring.
 const CABINET_KEYS = {
@@ -683,6 +683,7 @@ function makeArt(scene) {
   makeProps(scene);
   makeLights(scene);
   makeBackdrops(scene);
+  makeLogo(scene);
   makeFx(scene);
 }
 
@@ -1023,6 +1024,55 @@ function makeLights(scene) {
       }
     }
     c.putImageData(img, 0, 0);
+  });
+}
+
+// Title logo letters: polylines on a 4x6 grid, stroked thick so no font is needed.
+const GLYPHS = {
+  E: [[4, 0, 0, 0, 0, 6, 4, 6], [0, 3, 3, 3]],
+  L: [[0, 0, 0, 6, 4, 6]],
+  A: [[0, 6, 1.3, 0, 2.7, 0, 4, 6], [0.8, 4, 3.2, 4]],
+  P: [[0, 6, 0, 0, 4, 0, 4, 3.2, 0, 3.2]],
+  G: [[4, 0, 0, 0, 0, 6, 4, 6, 4, 3.2, 2.2, 3.2]],
+  O: [[0, 0, 4, 0, 4, 6, 0, 6, 0, 0, 4, 0]],
+  N: [[0, 6, 0, 0, 4, 6, 4, 0]],
+};
+
+// Arcade-chrome logo: slanted block letters, cool sky above the horizon, fire below.
+function makeLogo(scene) {
+  fromCanvas(scene, 'logo', 480, 150, (c) => {
+    c.lineJoin = 'round';
+    const word = (text, x, y, u, sw) => {
+      const chrome = c.createLinearGradient(0, -sw / 2, 0, u * 6 + sw / 2);
+      [
+        [0, '#2a1590'],
+        [0.32, '#8f7bff'],
+        [0.5, '#ffffff'],
+        [0.5, '#8a0010'],
+        [0.78, '#ff5a1a'],
+        [1, '#ffe14a'],
+      ].forEach(([at, col]) => chrome.addColorStop(at, col));
+      // drop shadow, white rim, dark keyline, chrome face
+      [
+        [sw + 8, '#000', 4],
+        [sw + 8, '#fff', 0],
+        [sw + 3, '#16093f', 0],
+        [sw, chrome, 0],
+      ].forEach(([lw, style, off]) => {
+        c.lineWidth = lw;
+        c.strokeStyle = style;
+        [...text].forEach((ch, i) => {
+          c.setTransform(1, 0, -0.3, 1, x + i * (u * 4 + sw + u) + off, y + off);
+          for (const line of GLYPHS[ch]) {
+            c.beginPath();
+            for (let k = 0; k < line.length; k += 2) c.lineTo(line[k] * u, line[k + 1] * u);
+            c.stroke();
+          }
+        });
+      });
+    };
+    word('EL', 214, 14, 5, 8);
+    word('APAGON', 56, 64, 11, 15);
   });
 }
 
@@ -1572,23 +1622,17 @@ class TitleScene extends Phaser.Scene {
     ];
 
     const serif = 'Georgia, "Times New Roman", serif';
-    this.titleShadow = this.add
-      .text(width / 2 + 3, 92, 'THE DROWNED BELL', { fontFamily: serif, fontSize: '46px', color: '#b00010', fontStyle: 'bold' })
-      .setOrigin(0.5)
-      .setDepth(20);
-    this.title = this.add
-      .text(width / 2, 90, 'THE DROWNED BELL', { fontFamily: serif, fontSize: '46px', color: '#f0f0f0', fontStyle: 'bold' })
-      .setOrigin(0.5)
-      .setDepth(21);
+    this.titleShadow = this.add.image(width / 2 + 3, 98, 'logo').setTintFill(0xb00010).setDepth(20);
+    this.title = this.add.image(width / 2, 96, 'logo').setDepth(21);
     this.add
-      .text(width / 2, 132, 'a nocturne in black, white & crimson', { fontFamily: serif, fontSize: '14px', color: '#8c8c8c', fontStyle: 'italic' })
+      .text(width / 2, 186, 'a nocturne in black, white & crimson', { fontFamily: serif, fontSize: '14px', color: '#8c8c8c', fontStyle: 'italic' })
       .setOrigin(0.5)
       .setDepth(21);
 
     this.add
       .text(
         width / 2,
-        212,
+        240,
         'STICK  move      BUTTON 1  use tool (hold: focus flashlight)\nBUTTON 2  jump / hold to glide      BUTTON 3 / 4  switch tool\n\nGet hit and you drop your tool \u2014 grab it back before it fades.',
         { fontFamily: 'monospace', fontSize: '11px', color: '#9a9a9a', align: 'center', lineSpacing: 4 },
       )
@@ -1596,7 +1640,7 @@ class TitleScene extends Phaser.Scene {
       .setDepth(21);
 
     this.prompt = this.add
-      .text(width / 2, 312, '[ PRESS START ]', { fontFamily: 'monospace', fontSize: '16px', color: '#ffffff' })
+      .text(width / 2, 326, '[ PRESS START ]', { fontFamily: 'monospace', fontSize: '16px', color: '#ffffff' })
       .setOrigin(0.5)
       .setDepth(21);
 
