@@ -67,10 +67,12 @@ const clearTaps = () => {
 const BTN = {
   left: ['P1_L'],
   right: ['P1_R'],
-  jump: ['P1_2', 'P1_U'],
-  use: ['P1_1'],
-  next: ['P1_3'],
+  up: ['P1_U'],
+  down: ['P1_D'],
+  jump: ['P1_1'],
+  use: ['P1_2'],
   prev: ['P1_4'],
+  next: ['P1_5'],
   mute: ['P1_6'],
 };
 
@@ -412,12 +414,22 @@ class AudioEngine {
       case 'glitch':
         this.glitchNoise(0.2);
         break;
+      case 'shot':
+        this.noiseHit(t, 0.25, 0.9, 100, 5000);
+        this.sweep('square', 300, 50, 0.2, 0.15);
+        break;
       case 'greatbell':
         this.bell(midi(38), t, 0.4, 9, this.sfx);
         this.bell(midi(38), t + 2.2, 0.3, 9, this.sfx);
         this.bell(midi(38), t + 4.4, 0.25, 9, this.sfx);
         break;
     }
+  }
+
+  // El Silbon's whistle: a rising do-re-mi-fa-sol-la-si.
+  whistle(vol, base, step = 0.32) {
+    if (!this.ctx) return;
+    [0, 2, 4, 5, 7, 9, 11].forEach((n, i) => this.tone('sine', midi(base + n), this.now + i * step, step * 1.3, vol, 4000, 0.05, true, this.sfx));
   }
 
   glitchNoise(dur) {
@@ -446,6 +458,7 @@ const PAL = {
   s: '#c9c9c9', // pale skin
   r: '#ff1a1a', // red eyes
   R: '#7a0008', // dark red
+  c: '#c00010', // umbrella canopy
   1: '#0e0e0e',
   2: '#232323',
   3: '#383838',
@@ -619,12 +632,12 @@ const ICONS = {
   ],
   umbrella: [
     '.......1........',
-    '......151.......',
-    '.....15551......',
-    '....1555551.....',
-    '...155555551....',
-    '..15556555551...',
-    '.1555565555551..',
+    '......1c1.......',
+    '.....1ccc1......',
+    '....1ccccc1.....',
+    '...1ccccccc1....',
+    '..1cccrccccc1...',
+    '.1ccccrcccccc1..',
     '.1.1.1.5.1.1.1..',
     '.......5........',
     '.......5........',
@@ -635,14 +648,27 @@ const ICONS = {
   ],
 };
 
+ICONS.revolver = [
+  '................',
+  '................',
+  '................',
+  '................',
+  '...4666666666...',
+  '..44555555556...',
+  '..4444444.......',
+  '..455.3.........',
+  '..445...........',
+  '.445............',
+  '.44.............',
+];
 const UMBRELLA_OPEN = [
   '..........1111111111..........',
-  '.......1115555555555111.......',
-  '.....11555555565555555511.....',
-  '...115555555556555555555511...',
-  '..15555555555565555555555551..',
-  '.1555555555555655555555555551.',
-  '155555555555556555555555555551',
+  '.......111cccccccccc111.......',
+  '.....11cccccccrcccccccc11.....',
+  '...11cccccccccrcccccccccc11...',
+  '..1cccccccccccrcccccccccccc1..',
+  '.1ccccccccccccrccccccccccccc1.',
+  '1cccccccccccccrcccccccccccccc1',
   '1.1..1..1..1..5..1..1..1..1.11',
   '..............5...............',
   '..............5...............',
@@ -666,6 +692,64 @@ function makeArt(scene) {
   sheet(scene, 'shade', [[...SHADE_TOP, ...SHADE_LEGS_A], [...SHADE_TOP, ...SHADE_LEGS_B]], 16, 32);
   sheet(scene, 'bat', BAT, 16, 8);
   for (const [k, rows] of Object.entries(ICONS)) sheet(scene, `tool_${k}`, [rows], 16, 16);
+
+  // El Silbon: a gaunt, too-tall man under a wide hat, a sack of bones on his back. Two walk frames.
+  fromCanvas(scene, 'silbon', 48, 56, (c) => {
+    [0, 24].forEach((ox, step) => {
+      const r = (col, x, y, w, h) => {
+        c.fillStyle = col;
+        c.fillRect(ox + x, y, w, h);
+      };
+      r('#5a5a5a', 1, 20, 5, 9); // sack
+      r('#2a2a2a', 2, 23, 1, 1);
+      r('#2a2a2a', 4, 26, 1, 1);
+      r('#2a2a2a', 8, 2, 8, 7); // hat
+      r('#5a5a5a', 8, 2, 8, 1);
+      r('#3a3a3a', 2, 9, 20, 2);
+      r('#6a6a6a', 2, 9, 20, 1);
+      r('#c9c9c9', 9, 11, 6, 6); // face
+      r('#000', 9, 11, 6, 2);
+      r('#8c8c8c', 10, 17, 4, 1);
+      r('#4a4a4a', 8, 18, 8, 16); // coat
+      r('#1c1c1c', 9, 18, 6, 16);
+      r('#2a2a2a', 6, 19, 2, 20); // arms
+      r('#2a2a2a', 16, 19, 2, 20);
+      r('#c9c9c9', 6, 39, 2, 2);
+      r('#c9c9c9', 16, 39, 2, 2);
+      r('#2a2a2a', 9 - step * 2, 34, 2, 22); // legs
+      r('#2a2a2a', 13 + step * 2, 34, 2, 22);
+      r('#5a5a5a', 8 - step * 2, 55, 4, 1);
+      r('#5a5a5a', 13 + step * 2, 55, 4, 1);
+    });
+  });
+  [0, 1].forEach((i) => scene.textures.get('silbon').add(i, 0, i * 24, 0, 24, 56));
+  // The campesino: yellow straw hat, pale shirt, rolled trousers.
+  fromCanvas(scene, 'campesino', 16, 26, (c) => {
+    const r = (col, x, y, w, h) => {
+      c.fillStyle = col;
+      c.fillRect(x, y, w, h);
+    };
+    r('#d9a520', 5, 0, 6, 3); // hat
+    r('#f2c230', 1, 3, 14, 2);
+    r('#8a6410', 5, 2, 6, 1);
+    r('#8a5a36', 5, 5, 6, 5); // face
+    r('#0c0c0c', 9, 7, 1, 1);
+    r('#2a1a10', 6, 9, 4, 1);
+    r('#b0b0b0', 4, 10, 8, 8); // shirt
+    r('#8c8c8c', 3, 11, 1, 6);
+    r('#8c8c8c', 12, 11, 1, 6);
+    r('#8a5a36', 12, 17, 1, 2);
+    r('#4a4a4a', 5, 18, 2, 7); // trousers
+    r('#4a4a4a', 9, 18, 2, 7);
+    r('#8a5a36', 5, 25, 2, 1);
+    r('#8a5a36', 9, 25, 2, 1);
+  });
+  fromCanvas(scene, 'bone', 8, 4, (c) => {
+    c.fillStyle = '#e6e6e6';
+    c.fillRect(1, 1, 6, 2);
+    c.fillRect(0, 0, 2, 4);
+    c.fillRect(6, 0, 2, 4);
+  });
   sheet(scene, 'umbrella_open', [UMBRELLA_OPEN], 30, 12);
 
   fromCanvas(scene, 'eyes', 8, 4, (c) => {
@@ -688,6 +772,7 @@ function makeArt(scene) {
   makeLights(scene);
   makeBackdrops(scene);
   makeLogo(scene);
+  makeFont(scene);
   makeFx(scene);
 }
 
@@ -802,6 +887,14 @@ function makeTiles(scene) {
     c.fillStyle = '#8a8a8a';
     c.fillRect(9, 3, 1, 1);
     c.fillRect(5, 9, 1, 1);
+    // yellow paint daubed across it: this stone can be broken
+    c.fillStyle = '#e8c21a';
+    for (let i = 0; i < 12; i++) c.fillRect(2 + i, 13 - i, 2, 2);
+    c.fillRect(1, 1, 3, 2);
+    c.fillRect(12, 13, 3, 2);
+    c.fillStyle = '#8a7410';
+    c.fillRect(4, 14, 1, 2);
+    c.fillRect(13, 4, 1, 3);
   });
 
   fromCanvas(scene, 'spikes', 16, 16, (c) => {
@@ -1117,9 +1210,9 @@ function makeProps(scene) {
 function makeLights(scene) {
   fromCanvas(scene, 'light', 128, 128, (c) => {
     const g = c.createRadialGradient(64, 64, 0, 64, 64, 64);
-    g.addColorStop(0, 'rgba(255,255,255,1)');
-    g.addColorStop(0.45, 'rgba(255,255,255,0.9)');
-    g.addColorStop(0.75, 'rgba(255,255,255,0.45)');
+    g.addColorStop(0, 'rgba(255,255,255,0.85)');
+    g.addColorStop(0.45, 'rgba(255,255,255,0.55)');
+    g.addColorStop(0.75, 'rgba(255,255,255,0.22)');
     g.addColorStop(1, 'rgba(255,255,255,0)');
     c.fillStyle = g;
     c.fillRect(0, 0, 128, 128);
@@ -1139,7 +1232,7 @@ function makeLights(scene) {
           const edge = 1 - Math.pow(a / spread, 3);
           const fall = 1 - Math.pow(d / 256, 2.4);
           v = Math.max(0, edge * fall);
-          if (d < 14) v = Math.max(v, 1 - d / 14);
+          if (d < 14) v = Math.max(v, 0.6 * (1 - d / 14));
         }
         const i = (y * 256 + x) * 4;
         img.data[i] = img.data[i + 1] = img.data[i + 2] = 255;
@@ -1150,53 +1243,77 @@ function makeLights(scene) {
   });
 }
 
-// Title logo letters: polylines on a 4x6 grid, stroked thick so no font is needed.
+// Title logo letters: brush strokes [x1, y1, x2, y2, ...] on a 4x6 grid, heavy at the start, thin at the tip.
+const O = [0, 0, 0, 6, 0, 0, 4, -0.3, 4, 0, 4, 6, 0, 6, 4, 5.7];
 const GLYPHS = {
-  E: [[4, 0, 0, 0, 0, 6, 4, 6], [0, 3, 3, 3]],
-  L: [[0, 0, 0, 6, 4, 6]],
-  A: [[0, 6, 1.3, 0, 2.7, 0, 4, 6], [0.8, 4, 3.2, 4]],
-  P: [[0, 6, 0, 0, 4, 0, 4, 3.2, 0, 3.2]],
-  G: [[4, 0, 0, 0, 0, 6, 4, 6, 4, 3.2, 2.2, 3.2]],
-  O: [[0, 0, 4, 0, 4, 6, 0, 6, 0, 0, 4, 0]],
-  N: [[0, 6, 0, 0, 4, 6, 4, 0]],
+  E: [0, 0, 0, 6, 0, 0, 4, -0.4, 0, 3, 3, 2.7, 0, 6, 4, 5.6],
+  L: [0, 0, 0, 6, 0, 6, 4, 5.6],
+  A: [2, 0, 0, 6, 2, 0, 4, 6, 0.6, 4, 3.4, 3.7],
+  P: [0, 0, 0, 6, 0, 0, 4, -0.3, 4, 0, 4, 3, 4, 3, 0, 3.3],
+  G: [4, 0, 0, 0.3, 0, 0, 0, 6, 0, 6, 4, 5.7, 4, 6, 4, 3.2, 4, 3.2, 2, 3.4],
+  O,
+  o: [...O, 3.4, -2.8, 1.8, -1.5], // O with acute accent
+  N: [0, 0, 0, 6, 0, 0, 4, 6, 4, 0, 4, 6],
 };
 
-// Arcade-chrome logo: slanted block letters, cool sky above the horizon, fire below.
+// Brush logo: slanted tapering strokes in the two blood reds, white rim.
 function makeLogo(scene) {
   fromCanvas(scene, 'logo', 480, 150, (c) => {
     c.lineJoin = 'round';
     const word = (text, x, y, u, sw) => {
-      const chrome = c.createLinearGradient(0, -sw / 2, 0, u * 6 + sw / 2);
+      const face = c.createLinearGradient(0, -sw / 2, 0, u * 6 + sw / 2);
+      face.addColorStop(0, '#ff1a1a');
+      face.addColorStop(1, '#c00010');
+      // drop shadow, white rim, dark keyline, blood-red face
       [
-        [0, '#2a1590'],
-        [0.32, '#8f7bff'],
-        [0.5, '#ffffff'],
-        [0.5, '#8a0010'],
-        [0.78, '#ff5a1a'],
-        [1, '#ffe14a'],
-      ].forEach(([at, col]) => chrome.addColorStop(at, col));
-      // drop shadow, white rim, dark keyline, chrome face
-      [
-        [sw + 8, '#000', 4],
-        [sw + 8, '#fff', 0],
-        [sw + 3, '#16093f', 0],
-        [sw, chrome, 0],
+        [8, '#000', 4],
+        [8, '#fff', 0],
+        [3, '#000', 0],
+        [0, face, 0],
       ].forEach(([lw, style, off]) => {
         c.lineWidth = lw;
-        c.strokeStyle = style;
+        c.strokeStyle = c.fillStyle = style;
         [...text].forEach((ch, i) => {
-          c.setTransform(1, 0, -0.3, 1, x + i * (u * 4 + sw + u) + off, y + off);
-          for (const line of GLYPHS[ch]) {
+          c.setTransform(1, 0, -0.3, 1, x + i * (u * 5 + sw) + off, y + off);
+          const g = GLYPHS[ch];
+          for (let k = 0; k < g.length; k += 4) {
+            const [ax, ay, bx, by] = g.slice(k, k + 4).map((v) => v * u);
+            const s = sw / 2 / Math.hypot(bx - ax, by - ay);
+            const dx = (bx - ax) * s;
+            const dy = (by - ay) * s;
             c.beginPath();
-            for (let k = 0; k < line.length; k += 2) c.lineTo(line[k] * u, line[k + 1] * u);
-            c.stroke();
+            c.moveTo(ax - dx - dy, ay - dy + dx);
+            c.lineTo(ax - dx + dy, ay - dy - dx);
+            c.lineTo(bx + (dx + dy) * 0.4, by + (dy - dx) * 0.4);
+            c.lineTo(bx + (dx - dy) * 0.4, by + (dy + dx) * 0.4);
+            c.closePath();
+            lw ? c.stroke() : c.fill();
           }
         });
       });
     };
     word('EL', 214, 14, 5, 8);
-    word('APAGON', 56, 64, 11, 15);
+    word('APAGoN', 56, 64, 11, 15);
   });
+}
+
+// 5x7 pixel font, one base-32 digit per row; drawn 2px wide for chunky 8-bit stems.
+const FONT_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,!?&-:/() Ñ¡¿';
+const FONT =
+  'ehhvhhhuhhuhhuehgggheuhhhhhuvgguggvvggugggehgjhhehhhvhhhe44444e1111hhehikokihggggggvhrrhhhhhppljjhehhhhheuhhugggehhhliduhhukihehge1hev444444hhhhhhehhhhaa4hhhhrrhhha4ahhhha4444v1248gvehjlphe4c4444eeh168gveh161he26aiv22vgu11heegguhhev124444ehhehheehhf11e000008800004484444404eh124048kk8lid000e000044044011248gg248884284222480000000ehpljhh40444444048ghe';
+
+function makeFont(scene) {
+  fromCanvas(scene, 'font', FONT_CHARS.length * 8, 8, (c) => {
+    c.fillStyle = '#fff';
+    [...FONT].forEach((d, i) => {
+      for (let b = 0; b < 5; b++) if ((parseInt(d, 32) << b) & 16) c.fillRect(((i / 7) | 0) * 8 + b, i % 7, 2, 1);
+    });
+  });
+  scene.cache.bitmapFont.add('font', Phaser.GameObjects.RetroFont.Parse(scene, { image: 'font', width: 8, height: 8, chars: FONT_CHARS }));
+}
+
+function label(scene, x, y, text, tint = 0xffffff, scale = 1) {
+  return scene.add.bitmapText(x, y, 'font', text, 8 * scale, 1).setOrigin(0.5).setTint(tint);
 }
 
 function makeBackdrops(scene) {
@@ -1349,6 +1466,19 @@ function makeFx(scene) {
     c.fillStyle = '#fff';
     c.fillRect(0, 0, 2, 2);
   });
+  // Free-aim crosshair.
+  fromCanvas(scene, 'reticle', 11, 11, (c) => {
+    c.strokeStyle = 'rgba(255,255,255,0.9)';
+    c.lineWidth = 1;
+    c.beginPath();
+    c.arc(5, 5, 4, 0, Math.PI * 2);
+    c.stroke();
+    c.fillStyle = '#ff1a1a';
+    c.fillRect(5, 0, 1, 2);
+    c.fillRect(5, 9, 1, 2);
+    c.fillRect(0, 5, 2, 1);
+    c.fillRect(9, 5, 2, 1);
+  });
   fromCanvas(scene, 'blood', 3, 3, (c) => {
     c.fillStyle = '#c00010';
     c.fillRect(0, 0, 3, 3);
@@ -1405,7 +1535,10 @@ function makeFx(scene) {
 
 const T = 16;
 const OX = 56; // tiles of intro forest prepended before the old world
-const W = 150 + OX;
+const BASE_W = 192; // width of the world before the forest was prepended
+const W = BASE_W + OX;
+const ARENA_X = 150; // first column of the ruins where El Silbon is fought
+const ARENA_Y = 30;
 const H = 40;
 
 const EMPTY = 0;
@@ -1429,6 +1562,13 @@ function buildWorld() {
   const spikes = (x1, x2, y, abyss = false) => {
     for (let x = x1; x <= x2; x++) e('spikes', x, y, { abyss });
   };
+
+  // World shell (the forest is prepended later, so this is the base world)
+  fill(0, 0, 1, H - 1);
+  fill(BASE_W - 2, 0, BASE_W - 1, H - 1);
+  fill(0, H - 2, BASE_W - 1, H - 1);
+  fill(ARENA_X - 2, 0, ARENA_X - 1, H - 1); // belfry's outer wall; the ruins lie beyond it
+  fill(ARENA_X, ARENA_Y, BASE_W - 3, H - 3);
 
   // Llanos flatlands: dry earth, leafless trees and low scrub.
   fill(2, 26, 33, 37);
@@ -1651,7 +1791,7 @@ void main() {
       vec4 s = texture2D(uMainSampler, uv + vec2(0.0, float(i) * 3.0 / resolution.y));
       if (luma(s.rgb) > luma(m.rgb)) { m = s; }
     }
-    col = mix(col, m, 0.9);
+    col = mix(col, m, 0.6);
   }
 
   col.rgb *= 0.86 + 0.14 * sin(outTexCoord.y * resolution.y * 3.14159);
@@ -1810,7 +1950,7 @@ class Storm {
     this.flash = Math.max(0, this.flash - dt * 1.6);
     this.bolt.setAlpha(this.flash > 0.3 ? 1 : this.flash * 3);
     this.skyFlash.setAlpha(this.flash * 0.45);
-    this.flashRect.setAlpha(this.flash * 0.18);
+    this.flashRect.setAlpha(this.flash * 0.12);
   }
 }
 
@@ -1827,6 +1967,7 @@ class BootScene extends Phaser.Scene {
     this.anims.create({ key: 'child-run', frames: frames('child', [1, 2, 3, 2]), frameRate: 10, repeat: -1 });
     this.anims.create({ key: 'child-jump', frames: frames('child', [4]), frameRate: 1 });
     this.anims.create({ key: 'shade-walk', frames: frames('shade', [0, 1]), frameRate: 3, repeat: -1 });
+    this.anims.create({ key: 'silbon-walk', frames: frames('silbon', [0, 1]), frameRate: 4, repeat: -1 });
     this.anims.create({ key: 'bat-fly', frames: frames('bat', [0, 1]), frameRate: 10, repeat: -1 });
     this.anims.create({ key: 'flame', frames: frames('flame', [0, 1]), frameRate: 7, repeat: -1 });
 
@@ -1858,28 +1999,51 @@ class TitleScene extends Phaser.Scene {
       this.add.image(width / 2 + 148, height - 36 - 55, 'eyes').setScale(2).setDepth(12),
     ];
 
-    const serif = 'Georgia, "Times New Roman", serif';
     this.titleShadow = this.add.image(width / 2 + 3, 98, 'logo').setTintFill(0xb00010).setDepth(20);
     this.title = this.add.image(width / 2, 96, 'logo').setDepth(21);
-    this.add
-      .text(width / 2, 186, 'a storm over the venezuelan plains', { fontFamily: serif, fontSize: '14px', color: '#8c8c8c', fontStyle: 'italic' })
-      .setOrigin(0.5)
-      .setDepth(21);
-
-    this.add
-      .text(
-        width / 2,
-        240,
-        'STICK  move      BUTTON 1  use tool (hold: focus flashlight)\nBUTTON 2  jump / hold to glide      BUTTON 3 / 4  switch tool\n\nGet hit and you drop your tool \u2014 grab it back before it fades.',
-        { fontFamily: 'monospace', fontSize: '11px', color: '#9a9a9a', align: 'center', lineSpacing: 4 },
-      )
-      .setOrigin(0.5)
-      .setDepth(21);
-
-    this.prompt = this.add
-      .text(width / 2, 326, '[ PRESS START ]', { fontFamily: 'monospace', fontSize: '16px', color: '#ffffff' })
-      .setOrigin(0.5)
-      .setDepth(21);
+    label(this, width / 2, 150, 'UNA TORMENTA SOBRE LOS LLANOS', 0x8c8c8c).setDepth(21);
+    // Controls, shown rather than told: what the child does, then the button that does it.
+    const img = (x, y, key, frame) => this.add.image(x, y, key, frame).setScale(2).setDepth(21);
+    const gfx = this.add.graphics().setDepth(21);
+    [
+      ['MOVER', 'JOYSTICK', (x, y) => this.add.sprite(x, y, 'child').setScale(2).setDepth(21).play('child-run')],
+      [
+        'USAR',
+        'BTN 2',
+        (x, y) => {
+          this.add.image(x + 10, y, 'cone').setOrigin(0, 0.5).setScale(0.2).setAlpha(0.5).setDepth(20);
+          img(x - 12, y, 'child', 0);
+          img(x + 4, y + 4, 'tool_flashlight');
+        },
+      ],
+      [
+        'SALTAR / PLANEAR',
+        'BTN 1',
+        (x, y) => {
+          img(x, y + 4, 'child', 4);
+          img(x, y - 30, 'umbrella_open');
+        },
+      ],
+      ['CAMBIAR', 'BTN 4 / 5', (x, y) => TOOLS.slice(0, 3).forEach((t, i) => img(x + (i - 1) * 30, y + 6, `tool_${t}`))],
+      [
+        'APUNTAR',
+        'BTN 3 Y JOYSTICK',
+        (x, y) => {
+          img(x - 12, y, 'child', 0);
+          img(x + 14, y - 22, 'reticle').setRotation(-Math.PI / 4);
+        },
+      ],
+    ].forEach(([act, btn, icon], i) => {
+      const x = width / 2 + (i - 2) * 124;
+      icon(x, 214);
+      label(this, x, 250, act).setDepth(21);
+      gfx.fillStyle(0x4a4a4a).fillRect(x - 13, 276, 26, 6);
+      if (i) gfx.fillStyle(0xc00010).fillRect(x - 8, 268, 16, 8).fillStyle(0xff1a1a).fillRect(x - 6, 266, 12, 4);
+      else gfx.fillStyle(0x9a9a9a).fillRect(x, 264, 3, 12).fillStyle(0xff1a1a).fillRect(x - 3, 259, 9, 8);
+      label(this, x, 292, btn, 0x8c8c8c).setDepth(21);
+    });
+    label(this, width / 2, 314, 'ABAJO X2: BAJAR POR LAS VIGAS   PINTURA AMARILLA: SE ROMPE   BTN 6: SILENCIAR', 0x6a6a6a).setDepth(21);
+    this.prompt = label(this, width / 2, 344, 'PULSA START', 0xffffff, 2).setDepth(21);
 
     const start = () => {
       if (this.starting) return;
@@ -1918,8 +2082,9 @@ const MAX_HEARTS = 3;
 const DROP_TIME = 5000; // how long a dropped tool waits on the ground
 const BASE_DARK = 0.8;
 const HUD_LINGER = 4000; // ms the HUD stays up after a tool change or a hit
-const TOOLS = ['flashlight', 'crowbar', 'umbrella'];
-const TOOL_NAMES = { flashlight: 'FLASHLIGHT', crowbar: 'CROWBAR', umbrella: 'UMBRELLA' };
+const TOOLS = ['flashlight', 'crowbar', 'umbrella', 'revolver'];
+const BOSS_HP = 8;
+const TOOL_NAMES = { flashlight: 'LINTERNA', crowbar: 'PATA DE CABRA', umbrella: 'PARAGUAS', revolver: 'REVOLVER' };
 
 class GameScene extends Phaser.Scene {
   constructor() {
@@ -1943,11 +2108,17 @@ class GameScene extends Phaser.Scene {
     this.stunUntil = 0;
     this.lastGround = 0;
     this.jumpPressedAt = -1e9;
+    this.downAt = -1e9;
+    this.dropRow = -1; // beam row being dropped through
+    this.dropUntil = 0;
     this.attackCooldown = 0;
     this.swingUntil = 0;
     this.gliding = false;
     this.stepTimer = 0;
     this.flicker = 1;
+    this.aiming = false;
+    this.aimAngle = 0;
+    this.aim = { x: 1, y: 0 };
 
     const cam = this.cameras.main;
     this.glitch = addCameraFx(cam, 0.04);
@@ -1968,7 +2139,17 @@ class GameScene extends Phaser.Scene {
     cam.setBounds(0, 0, W * T, H * T);
     cam.startFollow(this.player, true, 0.12, 0.12, 0, 30);
 
-    this.time.delayedCall(900, () => this.hint('start', 'You step out of the house. Head east through the forest \u2014 the llanos lie beyond.'));
+    this.cut = false; // cutscene: the child stands frozen
+    this.boss = null;
+    this.silbon = null;
+    this.ruinBell = null;
+    this.thrown = false; // the revolver has been thrown in
+    // The legend: when the whistle sounds close, El Silbon is far away.
+    this.time.delayedCall(5200, () => {
+      audio.whistle(0.14, 76);
+      this.hint('whistle', 'Un silbido... dicen que si suena cerca, el esta lejos.', 4500);
+    });
+    this.time.delayedCall(900, () => this.hint('start', 'Sales de tu casa. Camina al este por el bosque; los llanos quedan mas alla.'));
   }
 
   buildBackdrop() {
@@ -1985,11 +2166,11 @@ class GameScene extends Phaser.Scene {
     // The mound is layered: packed dirt on the open hillside, bare cave rock
     // below row CAVE_Y, and ruin stone only in the church at the very end.
     const solidTile = (x, y, top) => {
-      if (x >= 106 && y < CAVE_Y) return top ? TILE.STONE_TOP : TILE.STONE;
+      if (x >= 106 + OX && y < CAVE_Y) return top ? TILE.STONE_TOP : TILE.STONE;
       if (y >= CAVE_Y) return top ? TILE.ROCK_TOP : TILE.ROCK;
       return top ? TILE.DIRT_TOP : TILE.DIRT;
     };
-    const bgTile = (x, y) => (y >= CAVE_Y ? TILE.CAVE : x >= 106 ? TILE.STONE : TILE.BG);
+    const bgTile = (x, y) => (y >= CAVE_Y ? TILE.CAVE : x >= 106 + OX ? TILE.STONE : TILE.BG);
 
     const data = grid.map((row, y) =>
       row.map((v, x) => {
@@ -2214,11 +2395,11 @@ class GameScene extends Phaser.Scene {
     const l = { x: shrine.x, y: shrine.y - 16, r: 80, flicker: true };
     this.lights.push(l);
     if (this.dark) {
-      l.glow = this.add.image(l.x, l.y, 'light').setBlendMode(Phaser.BlendModes.ADD).setDepth(45).setScale(88 / 64);
+      l.glow = this.add.image(l.x, l.y, 'light').setBlendMode(Phaser.BlendModes.ADD).setDepth(45).setScale(88 / 64).setAlpha(0.07);
     }
     if (!silent) {
       audio.play('checkpoint');
-      this.message('The candles remember you.');
+      this.message('Las velas te recuerdan.');
     }
   }
 
@@ -2276,8 +2457,10 @@ class GameScene extends Phaser.Scene {
 
     this.held = this.add.image(p.x, p.y, 'tool_flashlight').setDepth(11);
     this.umbrellaOpen = this.add.image(p.x, p.y, 'umbrella_open').setDepth(11).setVisible(false);
+    this.reticle = this.add.image(p.x, p.y, 'reticle').setDepth(62).setVisible(false);
 
-    this.physics.add.collider(p, this.layer);
+    // The beam row being dropped through stops holding the child up.
+    this.physics.add.collider(p, this.layer, null, (_, t) => t.index !== TILE.BEAM || t.y !== this.dropRow);
     this.physics.add.collider(p, this.crackedGroup);
     this.physics.add.collider(p, this.veilGroup);
     this.physics.add.overlap(p, this.shades, (_, m) => this.onMonsterTouch(m));
@@ -2292,9 +2475,9 @@ class GameScene extends Phaser.Scene {
     // Additive glow under the darkness so light visibly lights the rain and stone.
     const ADD = Phaser.BlendModes.ADD;
     this.coneGlow = this.add.image(0, 0, 'cone').setOrigin(0, 0.5).setBlendMode(ADD).setDepth(45).setVisible(false);
-    this.auraGlow = this.add.image(0, 0, 'light').setBlendMode(ADD).setDepth(45).setAlpha(0.1);
+    this.auraGlow = this.add.image(0, 0, 'light').setBlendMode(ADD).setDepth(45).setAlpha(0.05);
     for (const l of this.lights) {
-      l.glow = this.add.image(l.x, l.y, 'light').setBlendMode(ADD).setDepth(45).setScale((l.r * 1.1) / 64).setAlpha(0.14);
+      l.glow = this.add.image(l.x, l.y, 'light').setBlendMode(ADD).setDepth(45).setScale((l.r * 1.1) / 64).setAlpha(0.07);
     }
     this.dropBars = this.add.graphics().setDepth(61);
   }
@@ -2392,11 +2575,12 @@ class GameScene extends Phaser.Scene {
     if (first) {
       audio.play('newtool');
       this.glitch.hit(0.4);
-      if (tool === 'crowbar') this.message('CROWBAR \u2014 press BUTTON 1 to swing. Cracked rock gives way.', 5000);
-      if (tool === 'umbrella') this.message('UMBRELLA \u2014 hold BUTTON 2 while falling to glide.', 5000);
+      if (tool === 'crowbar') this.message('PATA DE CABRA - pulsa BOTON 2 para golpear. La piedra agrietada cede.', 5000);
+      if (tool === 'umbrella') this.message('PARAGUAS - manten BOTON 1 al caer para planear.', 5000);
+      if (tool === 'revolver') this.hearts = MAX_HEARTS;
     } else {
       audio.play('pickup');
-      this.message(`Got your ${TOOL_NAMES[tool]} back.`, 1800);
+      this.message(`Recuperaste: ${TOOL_NAMES[tool]}.`, 1800);
     }
   }
 
@@ -2408,9 +2592,9 @@ class GameScene extends Phaser.Scene {
     audio.play('drop');
     if (this.hud) this.hud.pulse();
     if (!this.hintsShown.has('drop')) {
-      this.hint('drop', `You dropped the ${TOOL_NAMES[tool]}! Grab it before the dark takes it back.`, 3500);
+      this.hint('drop', `¡Soltaste: ${TOOL_NAMES[tool]}! Recogela antes de que la oscuridad se la lleve.`, 3500);
     } else {
-      this.message(`Dropped the ${TOOL_NAMES[tool]}!`, 1500);
+      this.message(`¡Soltaste: ${TOOL_NAMES[tool]}!`, 1500);
     }
   }
 
@@ -2424,7 +2608,7 @@ class GameScene extends Phaser.Scene {
     item.setVelocity(0, 0);
     item.expires = null;
     item.setAlpha(1);
-    this.message(`The dark took your ${TOOL_NAMES[item.tool]}... it waits by the candles.`, 3500);
+    this.message(`La oscuridad se llevo: ${TOOL_NAMES[item.tool]}... te espera junto a las velas.`, 3500);
   }
 
   updateTools(dt, time) {
@@ -2432,6 +2616,9 @@ class GameScene extends Phaser.Scene {
     const useDown = tap(...BTN.use);
     const useHeld = down(...BTN.use);
     const f = this.facing;
+    const ax = this.aim.x;
+    const ay = this.aim.y;
+    const aimAng = this.aimAngle;
     this.attackCooldown -= dt;
     this.focus = false;
     this.cone = null;
@@ -2440,20 +2627,20 @@ class GameScene extends Phaser.Scene {
     this.held.setVisible(!!this.equipped && !this.gliding && !this.dead);
     if (!this.equipped) return;
 
-    this.held.setTexture(`tool_${this.equipped}`).setFlipX(f < 0);
+    this.held.setTexture(`tool_${this.equipped}`).setFlipX(!this.aiming && f < 0);
     const swingT = Math.max(0, (this.swingUntil - time) / 180);
 
     switch (this.equipped) {
       case 'flashlight': {
-        this.held.setPosition(p.x + f * 8, p.y - 11).setScale(0.6).setRotation(0);
+        this.held.setPosition(p.x + ax * 8, p.y - 11 + ay * 8).setScale(0.6).setRotation(this.aiming ? aimAng : 0);
         this.focus = useHeld;
         if (Math.random() < 0.008) this.flicker = 0;
         this.flicker = Math.min(1, this.flicker + dt * 6);
         if (this.flicker > 0.5 && !this.dead) {
           this.cone = {
-            x: p.x + f * 12,
-            y: p.y - 11,
-            angle: f > 0 ? 0 : Math.PI,
+            x: p.x + ax * 12,
+            y: p.y - 11 + ay * 12,
+            angle: aimAng,
             range: this.focus ? 270 : 190,
             half: this.focus ? 0.2 : 0.4,
             power: this.focus ? 2.4 : 1,
@@ -2463,31 +2650,59 @@ class GameScene extends Phaser.Scene {
         break;
       }
       case 'crowbar': {
-        const ang = swingT > 0 ? Phaser.Math.Linear(1.9, -1.2, 1 - swingT) : 0.5;
-        this.held.setPosition(p.x + f * 7, p.y - 10).setScale(0.8).setRotation(f * ang);
+        const tilt = swingT > 0 ? Phaser.Math.Linear(1.9, -1.2, 1 - swingT) : 0.5;
+        this.held.setPosition(p.x + ax * 7, p.y - 10 + ay * 7).setScale(0.8).setRotation(this.aiming ? aimAng + tilt : f * tilt);
         if (useDown && this.attackCooldown <= 0) {
           this.attackCooldown = 0.38;
           this.swingUntil = time + 180;
           audio.play('swing');
-          const box = new Phaser.Geom.Rectangle(f > 0 ? p.x + 2 : p.x - 32, p.y - 28, 30, 46);
-          this.strike(box, 2, 220, true);
+          this.strike(this.aimBox(2, 30, 46), 2, 220, true);
+        }
+        break;
+      }
+      case 'revolver': {
+        const kick = swingT > 0 ? -0.6 * swingT : 0;
+        this.held.setPosition(p.x + ax * 9, p.y - 11 + ay * 9).setScale(0.8).setRotation(this.aiming ? aimAng + kick : f * kick);
+        if (useDown && this.attackCooldown <= 0) {
+          this.attackCooldown = 0.45;
+          this.swingUntil = time + 180;
+          audio.play('shot');
+          this.cameras.main.shake(70, 0.006);
+          const x0 = p.x + ax * 14;
+          const y0 = p.y - 12 + ay * 14;
+          const shot = new Phaser.Geom.Line(x0, y0, x0 + Math.cos(aimAng) * 420, y0 + Math.sin(aimAng) * 420);
+          const tracer = this.add.graphics().setDepth(61).lineStyle(1, 0xffffff, 0.9).strokeLineShape(shot);
+          this.time.delayedCall(50, () => tracer.destroy());
+          const b = this.boss;
+          if (b && !b.dying && Phaser.Geom.Intersects.LineToRectangle(shot, b.getBounds())) this.hitBoss(Math.sign(b.x - p.x));
         }
         break;
       }
       case 'umbrella': {
         const thrust = swingT > 0 ? 8 * swingT : 0;
-        this.held.setPosition(p.x + f * (6 + thrust), p.y - 10).setScale(0.7).setRotation(f * 1.57);
+        this.held.setPosition(p.x + ax * (6 + thrust), p.y - 10 + ay * (6 + thrust)).setScale(0.7).setRotation(this.aiming ? aimAng + 1.57 : f * 1.57);
         if (useDown && this.attackCooldown <= 0) {
           this.attackCooldown = 0.4;
           this.swingUntil = time + 180;
           audio.play('poke');
-          const box = new Phaser.Geom.Rectangle(f > 0 ? p.x + 2 : p.x - 28, p.y - 18, 26, 12);
-          this.strike(box, 1, 320, false);
+          this.strike(this.aimBox(2, 26, 16), 1, 320, false);
         }
         break;
       }
     }
     if (this.gliding) this.umbrellaOpen.setPosition(p.x, p.y - 30);
+  }
+
+  // Axis-aligned hitbox extending from the player along the current aim vector.
+  // `len` runs along the aim, `wide` across it; 8-way aim keeps it corner-correct.
+  aimBox(reach, len, wide) {
+    const { x: ax, y: ay } = this.aim;
+    const along = reach + len / 2;
+    const cx = this.player.x + ax * along;
+    const cy = this.player.y - 12 + ay * along;
+    const w = Math.abs(ax) * len + Math.abs(ay) * wide;
+    const h = Math.abs(ay) * len + Math.abs(ax) * wide;
+    return new Phaser.Geom.Rectangle(cx - w / 2, cy - h / 2, w, h);
   }
 
   // Melee hit on everything inside `box`.
@@ -2496,7 +2711,7 @@ class GameScene extends Phaser.Scene {
     const hitMonster = (m) => {
       if (!m.active || m.dying) return;
       if (Phaser.Geom.Intersects.RectangleToRectangle(box, m.getBounds())) {
-        this.damage(m, dmg, this.facing * knock);
+        this.damage(m, dmg, (this.aim.x || this.facing) * knock);
         hitSomething = true;
       }
     };
@@ -2581,7 +2796,7 @@ class GameScene extends Phaser.Scene {
       if (Math.random() < 0.2) this.glitchFx.emitParticleAt(v.rect.centerX, Phaser.Math.Between(v.rect.top, v.rect.bottom), 1);
       if (Math.random() < 0.05) audio.play('burn');
       if (v.strength <= 0) this.dissolveVeil(v);
-      else this.hint('veil-focus', 'It recoils from the light... hold BUTTON 1 to focus the beam.');
+      else this.hint('veil-focus', 'Retrocede ante la luz... manten BOTON 2 para enfocar el haz.');
     }
   }
 
@@ -2736,7 +2951,7 @@ class GameScene extends Phaser.Scene {
   // Returns false if the hit was ignored.
   hurt(srcX) {
     const time = this.time.now;
-    if (this.dead || this.won || time < this.invulnUntil) return false;
+    if (this.dead || this.won || this.cut || time < this.invulnUntil) return false;
     const p = this.player;
     this.invulnUntil = time + 1400;
     this.stunUntil = time + 260;
@@ -2748,11 +2963,13 @@ class GameScene extends Phaser.Scene {
     this.cameras.main.shake(160, 0.012);
     if (this.hud) this.hud.pulse();
 
-    if (this.equipped) {
+    // El Silbon goes straight for the heart; lesser things only knock the tool away.
+    if (this.equipped && !this.boss) {
       this.dropTool(dir);
     } else {
       this.hearts--;
       if (this.hearts <= 0) this.die();
+      else if (this.boss && this.hearts === 1 && !this.found.has('revolver') && !this.thrown) this.throwRevolver();
     }
     return true;
   }
@@ -2766,13 +2983,14 @@ class GameScene extends Phaser.Scene {
     audio.play('death');
     this.glitch.hit(1.2);
     this.cameras.main.shake(400, 0.02);
-    if (this.hud) this.hud.big('THEY FOUND YOU');
+    if (this.hud) this.hud.big('TE ENCONTRARON');
     this.time.delayedCall(2200, () => {
       if (this.hud) this.hud.clearBig();
       this.hearts = MAX_HEARTS;
       this.dead = false;
       p.setVisible(true);
       p.body.enable = true;
+      if (this.boss) this.leaveArena();
       this.respawnAtCheckpoint();
     });
   }
@@ -2789,18 +3007,42 @@ class GameScene extends Phaser.Scene {
 
   updatePlayer(dt, time) {
     const p = this.player;
-    if (this.dead || this.won) {
+    if (this.dead || this.won || this.cut) {
       if (!this.dead) p.setVelocityX(0);
+      this.aiming = false;
+      this.reticle.setVisible(false);
       clearTaps();
       return;
     }
 
     const left = down(...BTN.left);
     const right = down(...BTN.right);
+    const up = down(...BTN.up);
+    const dn = down(...BTN.down);
+    const grounded = p.body.blocked.down;
+
+    // Free aim / focus: hold BUTTON 2 and steer with the stick. The stick drives
+    // the reticle instead of movement, so the child plants their feet while aiming.
+    const hx = (right ? 1 : 0) - (left ? 1 : 0);
+    const vy = (dn ? 1 : 0) - (up ? 1 : 0);
+    this.aiming = down(...BTN.use);
+    if (this.aiming) {
+      if (hx || vy) {
+        const q = Math.round(Math.atan2(vy, hx) / (Math.PI / 4)) * (Math.PI / 4);
+        this.aimAngle = q;
+        this.aim.x = Math.round(Math.cos(q));
+        this.aim.y = Math.round(Math.sin(q));
+        if (this.aim.x) this.facing = this.aim.x;
+      }
+    } else {
+      this.aimAngle = this.facing > 0 ? 0 : Math.PI;
+      this.aim.x = this.facing;
+      this.aim.y = 0;
+    }
+
     const jumpDown = tap(...BTN.jump);
     const jumpHeld = down(...BTN.jump);
     const jumpUp = untap(...BTN.jump);
-    const grounded = p.body.blocked.down;
 
     if (grounded) {
       if (!this.wasGrounded && this.lastVy > 220) audio.play('land');
@@ -2810,7 +3052,7 @@ class GameScene extends Phaser.Scene {
     this.lastVy = p.body.velocity.y;
 
     if (time > this.stunUntil) {
-      const dir = (right ? 1 : 0) - (left ? 1 : 0);
+      const dir = this.aiming ? 0 : (right ? 1 : 0) - (left ? 1 : 0);
       p.setVelocityX(dir * RUN);
       if (dir) this.facing = dir;
     }
@@ -2824,12 +3066,25 @@ class GameScene extends Phaser.Scene {
     }
     if (jumpUp && p.body.velocity.y < 0) p.setVelocityY(p.body.velocity.y * 0.45);
 
+    // Double-tap down to drop through a wooden beam.
+    const b = p.body;
+    if (tap(...BTN.down) && !this.aiming) {
+      const under = b.bottom + 1;
+      if (time - this.downAt < 300 && grounded && (this.tileAt(b.x, under) === BEAM || this.tileAt(b.right - 1, under) === BEAM)) {
+        this.dropRow = Math.floor(under / T);
+        this.dropUntil = time + 600;
+        this.downAt = this.lastGround = -1e9;
+        p.setVelocityY(60);
+      } else this.downAt = time;
+    }
+    if (this.dropRow >= 0 && (b.y > this.dropRow * T || time > this.dropUntil)) this.dropRow = -1;
+
     this.gliding = this.equipped === 'umbrella' && !grounded && jumpHeld && p.body.velocity.y > 0;
     if (this.gliding) p.setVelocityY(Math.min(p.body.velocity.y, GLIDE_FALL));
 
     if (tap(...BTN.prev)) this.cycleTool(-1);
     if (tap(...BTN.next)) this.cycleTool(1);
-    if (tap(...BTN.mute)) audio.music.gain.value = audio.music.gain.value > 0 ? 0 : 0.32;
+    if (tap(...BTN.mute)) audio.master.gain.value = audio.master.gain.value > 0 ? 0 : 0.9;
 
     p.setFlipX(this.facing < 0);
     if (!grounded) p.anims.play('child-jump', true);
@@ -2852,16 +3107,28 @@ class GameScene extends Phaser.Scene {
       }
     }
 
-    if (p.x > 83 * T && p.x < 90 * T) this.hint('veil', 'A veil of living shadow. Shine the flashlight on it.');
+    if (p.x > 83 * T && p.x < 90 * T) this.hint('veil', 'Un velo de sombra viva. Alumbralo con la linterna.');
     if (p.x > 140 * T && p.x < 146 * T && p.y < 12 * T && !this.found.has('umbrella')) {
-      this.hint('chasm', 'Too far to jump... if only something could slow the fall.', 4000);
+      this.hint('chasm', 'Muy lejos para saltar... si tan solo algo frenara la caida.', 4000);
     }
     if (this.found.has('crowbar') && p.x > 96 * T && p.x < 104 * T && p.y > 20 * T && p.y < 27 * T && this.cracked.has('101,26')) {
-      this.hint('floor', 'The floor here is cracked...');
+      this.hint('floor', 'El piso aqui esta agrietado...');
     }
-    if (p.x < 186 * T && p.x > 166 * T && p.y < 9 * T) this.hint('bell', 'The great bell. Ring it.');
+    if (grounded && p.x > 141 * T && p.x < 144 * T && p.y > 26 * T && p.y < 28 * T) {
+      this.hint('beam', 'Vigas de madera... pulsa ABAJO dos veces para bajar.');
+    }
+    if (p.x < 186 * T && p.x > 166 * T && p.y < 9 * T) this.hint('bell', 'La gran campana. Hazla sonar.');
+    if (this.aiming) this.hint('freeaim', 'APUNTADO LIBRE - manten BOTON 2 y apunta con el joystick.', 3000);
 
-    if (this.bellZone && !this.won && this.bellZone.contains(p.x, p.y - 10)) this.win();
+    // Free-aim reticle.
+    const dist = 42;
+    this.reticle
+      .setVisible(this.aiming)
+      .setPosition(p.x + Math.cos(this.aimAngle) * dist, p.y - 12 + Math.sin(this.aimAngle) * dist)
+      .setRotation(this.aimAngle)
+      .setAlpha(0.55 + 0.35 * Math.sin(time / 110));
+
+    if (!this.boss && !this.cut && this.bellZone.contains(p.x, p.y - 10)) this.silbonIntro();
   }
 
   updatePickups(time) {
@@ -2904,7 +3171,7 @@ class GameScene extends Phaser.Scene {
     const sx = cam.scrollX;
     const sy = cam.scrollY;
     const dark = this.dark;
-    const alpha = BASE_DARK * (1 - 0.93 * Math.min(1, this.storm.flash * 1.4));
+    const alpha = Math.max(0.32, BASE_DARK * (this.boss ? 0.6 : 1) * (1 - 0.93 * Math.min(1, this.storm.flash * 1.4)));
     const onScreen = (x, y, r) => x + r > sx && x - r < sx + cam.width && y + r > sy && y - r < sy + cam.height;
     const light = (x, y, r, a = 1) => {
       if (!onScreen(x, y, r)) return;
@@ -2920,7 +3187,7 @@ class GameScene extends Phaser.Scene {
     for (const l of this.lights) {
       const f = l.flicker ? 0.9 + Math.sin(time / 90 + l.x) * 0.05 + Math.random() * 0.05 : 1;
       light(l.x, l.y, l.r * f, 1);
-      if (l.glow) l.glow.setAlpha(0.12 * f + this.storm.flash * 0.1);
+      if (l.glow) l.glow.setAlpha(0.06 * f + this.storm.flash * 0.05);
     }
     for (const item of this.pickups.getChildren()) light(item.x, item.y, 26, 0.7);
 
@@ -2942,7 +3209,7 @@ class GameScene extends Phaser.Scene {
         .setPosition(c.x, c.y)
         .setScale(scaleX, scaleX * (Math.tan(c.half) / Math.tan(0.42)))
         .setRotation(c.angle)
-        .setAlpha((this.focus ? 0.4 : 0.26) * this.flicker);
+        .setAlpha((this.focus ? 0.2 : 0.12) * this.flicker);
     } else {
       this.coneGlow.setVisible(false);
     }
@@ -2978,6 +3245,240 @@ class GameScene extends Phaser.Scene {
     this.grove.setAlpha(1 - forest);
   }
 
+  // He was behind you the whole time. The far-off whistle, the castle coming down, then the ruins.
+  silbonIntro() {
+    const p = this.player;
+    const cam = this.cameras.main;
+    const { width, height } = this.scale;
+    this.cut = true;
+    audio.stopMusic();
+    audio.whistle(0.03, 48, 0.4);
+    this.message('Un silbido lejano, muy lejano... el esta aqui.', 4000);
+
+    const side = p.x > this.bell.x ? -1 : 1;
+    const ghost = this.add.image(p.x + side * 70, 9 * T, 'silbon', 0).setOrigin(0.5, 1).setDepth(12).setFlipX(side > 0).setAlpha(0);
+    const eyes = this.add.image(ghost.x - side * 2, ghost.y - 42.5, 'eyes').setDepth(60).setAlpha(0);
+    const white = this.add.rectangle(0, 0, width, height, 0xffffff).setOrigin(0).setScrollFactor(0).setDepth(200).setAlpha(0);
+    this.tweens.add({ targets: [ghost, eyes], alpha: 1, delay: 3000, duration: 900 });
+    this.time.delayedCall(3000, () => this.glitch.hit(0.8));
+
+    this.time.delayedCall(4600, () => {
+      cam.shake(2200, 0.02);
+      this.tweens.add({ targets: white, alpha: 1, delay: 700, duration: 1400 });
+      [0, 500, 1000, 1500].forEach((d) =>
+        this.time.delayedCall(d, () => {
+          audio.play('crumble');
+          this.storm.strike(1);
+          for (let i = 0; i < 12; i++) this.debrisFx.emitParticleAt(cam.scrollX + Math.random() * width, cam.scrollY + Math.random() * height, 6);
+        }),
+      );
+    });
+
+    this.time.delayedCall(7000, () => {
+      ghost.destroy();
+      eyes.destroy();
+      this.startArena();
+      this.tweens.add({ targets: white, alpha: 0, duration: 1200, onComplete: () => white.destroy() });
+    });
+  }
+
+  // The castle is gone: flat rubble under open sky, and El Silbon.
+  startArena() {
+    const p = this.player;
+    const x0 = (ARENA_X + OX) * T;
+    const gy = ARENA_Y * T;
+    const cam = this.cameras.main;
+    this.hills.setVisible(false);
+    this.grove.setVisible(false);
+    this.forestFar.setVisible(false);
+    this.forestMid.setVisible(false);
+    this.foreTrees.setVisible(false);
+    cam.setBounds(x0, 0, (BASE_W - 2 - ARENA_X) * T, H * T);
+    this.belfryBell = this.bell;
+    if (!this.ruinBell) {
+      for (const [x, h, a] of [[70, 40, -8], [250, 70, 5], [400, 28, 12], [560, 56, -4]]) {
+        this.add.tileSprite(x0 + x, gy + 4, 20, h, 'pillar').setOrigin(0.5, 1).setDepth(-8).setAngle(a);
+      }
+      this.ruinBell = this.add.image(x0 + 480, gy + 6, 'bell').setOrigin(0.5, 1).setDepth(-6);
+    }
+    this.bell = this.ruinBell;
+
+    this.checkpoint = { x: x0 + 110, y: gy };
+    this.hearts = MAX_HEARTS;
+    this.respawnAtCheckpoint();
+    this.facing = 1;
+
+    // Built once; a lost fight hides him and the next visit to the bell brings him back.
+    if (!this.silbon) {
+      const s = (this.silbon = this.physics.add.sprite(0, 0, 'silbon', 0));
+      s.setOrigin(0.5, 1).setDepth(12).setCollideWorldBounds(true).play('silbon-walk');
+      s.body.setSize(10, 42).setOffset(7, 14);
+      s.eyes = this.add.image(0, 0, 'eyes').setDepth(60);
+      this.bones = this.physics.add.group();
+      this.physics.add.collider(s, this.layer);
+      this.physics.add.collider(this.bones, this.layer, (bone) => bone.destroy());
+      this.physics.add.overlap(p, s, () => !s.dying && this.hurt(s.x));
+      this.physics.add.overlap(p, this.bones, (_, bone) => {
+        if (this.hurt(bone.x)) bone.destroy();
+      });
+    }
+    const b = (this.boss = this.silbon);
+    b.setPosition(x0 + 520, gy - 1).setVelocity(0, 0).setVisible(true);
+    b.eyes.setVisible(true);
+    b.body.enable = true;
+    b.hp = BOSS_HP;
+    b.state = 'walk';
+    b.nextAt = this.time.now + 3500;
+
+    if (this.hud) {
+      this.hud.big('EL SILBON');
+      this.time.delayedCall(2200, () => this.hud.clearBig());
+    }
+    this.time.delayedCall(1800, () => {
+      this.cut = false;
+      audio.startMusic();
+    });
+  }
+
+  // He won: the castle stands again and the child wakes a few steps short of the bell.
+  leaveArena() {
+    const b = this.boss;
+    this.boss = null;
+    this.thrown = false;
+    b.setVisible(false);
+    b.eyes.setVisible(false);
+    b.body.enable = false;
+    this.bones.clear(true, true);
+    for (const i of this.pickups.getChildren().slice()) if (i.tool === 'revolver') i.destroy();
+    this.inventory.delete('revolver');
+    this.found.delete('revolver');
+    if (this.equipped === 'revolver') this.equipped = TOOLS.find((t) => this.inventory.has(t)) || null;
+    this.bell = this.belfryBell;
+    this.hills.setVisible(true);
+    this.grove.setVisible(true);
+    this.forestFar.setVisible(true);
+    this.forestMid.setVisible(true);
+    this.foreTrees.setVisible(true);
+    this.cameras.main.setBounds(0, 0, W * T, H * T);
+    this.checkpoint = { x: 137 * T, y: 9 * T };
+    audio.whistle(0.14, 76);
+  }
+
+  // Walks you down, then either lunges or scatters bones from his sack.
+  updateBoss(time) {
+    const b = this.boss;
+    if (!b || b.dying) return;
+    const p = this.player;
+    const dx = p.x - b.x;
+    const dir = Math.sign(dx) || 1;
+    const rage = b.hp <= BOSS_HP / 2;
+    if (this.cut || this.dead) {
+      b.setVelocityX(0);
+    } else if (b.state === 'walk') {
+      b.setVelocityX(dir * (rage ? 78 : 52));
+      b.setFlipX(dir < 0);
+      if (time > b.nextAt) {
+        b.state = 'tell';
+        b.lunge = Math.abs(dx) < 150 && Math.random() < 0.6;
+        b.until = time + (rage ? 420 : 600);
+        b.setVelocityX(0);
+        audio.sweep('sine', 520, b.lunge ? 1040 : 780, 0.35, 0.09);
+      }
+    } else if (b.state === 'tell') {
+      if (time > b.until) {
+        if (b.lunge) {
+          b.state = 'lunge';
+          b.until = time + 520;
+          b.setVelocityX(dir * 290);
+        } else {
+          for (let i = 0; i < (rage ? 4 : 3); i++) {
+            const bone = this.bones.create(b.x, b.y - 40, 'bone').setDepth(13).setScale(1.5);
+            bone.setVelocity((Phaser.Math.Clamp(dx, -300, 300) / 0.8) * (0.6 + i * 0.3), -280 - i * 25).setAngularVelocity(500);
+          }
+          audio.play('swing');
+          b.state = 'walk';
+          b.nextAt = time + (rage ? 1300 : 1900);
+        }
+      }
+    } else if (time > b.until) {
+      b.state = 'walk';
+      b.nextAt = time + (rage ? 1100 : 1600);
+    }
+    b.anims.timeScale = b.state === 'walk' ? (rage ? 2 : 1) : 0;
+    const tell = b.state === 'tell' && Math.floor(time / 60) % 2;
+    b.eyes.setPosition(b.x + (b.flipX ? -2 : 2), b.y - 42.5).setScale(tell ? 2 : 1);
+  }
+
+  // A campesino steps out of the rubble: everything stops while he speaks and throws the gun.
+  throwRevolver() {
+    this.thrown = true;
+    this.cut = true;
+    this.bones.clear(true, true);
+    const p = this.player;
+    const x0 = (ARENA_X + OX) * T;
+    const gy = ARENA_Y * T;
+    const side = p.x > x0 + 320 ? -1 : 1;
+    const x = Phaser.Math.Clamp(p.x + side * 130, x0 + 30, x0 + 610);
+    const who = this.add.image(x, gy, 'campesino').setOrigin(0.5, 1).setScale(2).setDepth(9).setFlipX(side > 0).setAlpha(0);
+    const lamp = { x, y: gy - 30, r: 80, flicker: true };
+    this.lights.push(lamp);
+    const tx = Phaser.Math.Clamp(x, x0 + 170, x0 + 470);
+    const say = [
+      this.add.rectangle(tx, gy - 76, 328, 16, 0, 0.85).setDepth(61),
+      label(this, tx, gy - 76, 'EL SIEMPRE SE APARECE POR AQUI, MUCHACHO').setDepth(62),
+    ];
+    this.glitch.hit(0.5);
+    audio.play('checkpoint');
+    this.tweens.add({ targets: who, alpha: 1, duration: 300 });
+
+    this.time.delayedCall(1700, () => {
+      say[1].setText('¡TOMA! ¡DISPARALE!');
+      audio.play('swing');
+      this.spawnPickup('revolver', x - side * 12, gy - 40, -side * 150, -300, null);
+    });
+    this.time.delayedCall(2700, () => {
+      this.cut = false;
+      this.invulnUntil = this.time.now + 2500;
+      this.message('¡Un revolver! Agarralo y dispara con BOTON 2.', 5000);
+    });
+    this.tweens.add({
+      targets: [who, ...say],
+      alpha: 0,
+      delay: 5000,
+      duration: 1000,
+      onComplete: () => {
+        this.lights.splice(this.lights.indexOf(lamp), 1);
+        who.destroy();
+        say.forEach((o) => o.destroy());
+      },
+    });
+  }
+
+  hitBoss(dir) {
+    const b = this.boss;
+    b.hp--;
+    this.bleed(b.x, b.y - 30, 18, 2);
+    audio.play('flesh');
+    b.setTint(0xff4444);
+    this.time.delayedCall(120, () => b.clearTint());
+    if (b.state !== 'lunge') b.setVelocity(dir * 120, -90);
+    if (this.hud) this.hud.pulse();
+    if (b.hp > 0) return;
+
+    b.dying = true;
+    b.body.enable = false;
+    b.anims.stop();
+    this.bones.clear(true, true);
+    this.bleed(b.x, b.y - 28, 90, 6);
+    audio.play('die');
+    [83, 79, 76, 72, 67, 60, 48].forEach((n, i) => audio.tone('sine', midi(n), audio.now + i * 0.22, 0.3, 0.1, 4000, 0.03, true, audio.sfx));
+    this.glitch.hit(1);
+    this.cameras.main.shake(500, 0.015);
+    this.tweens.add({ targets: [b, b.eyes], alpha: 0, duration: 1600 });
+    this.tweens.add({ targets: b, scaleY: 0.1, duration: 1600 });
+    this.time.delayedCall(2400, () => this.win());
+  }
+
   win() {
     this.won = true;
     this.player.setVelocity(0, 0);
@@ -2991,11 +3492,11 @@ class GameScene extends Phaser.Scene {
     const white = this.add.rectangle(0, 0, width, height, 0xffffff).setOrigin(0).setScrollFactor(0).setDepth(200).setAlpha(0);
     this.tweens.add({ targets: white, alpha: 1, delay: 2600, duration: 2200 });
     const lines = [
-      this.add.text(width / 2, height / 2 - 22, 'THE BELL TOLLS.', { fontFamily: 'Georgia, serif', fontSize: '32px', color: '#000000', fontStyle: 'bold' }),
-      this.add.text(width / 2, height / 2 + 18, 'the rain forgets you... for now', { fontFamily: 'Georgia, serif', fontSize: '15px', color: '#8a0010', fontStyle: 'italic' }),
+      label(this, width / 2, height / 2 - 22, 'SUENA LA CAMPANA.', 0, 4),
+      label(this, width / 2, height / 2 + 18, 'LA LLUVIA TE OLVIDA... POR AHORA', 0x8a0010),
     ];
     lines.forEach((t, i) => {
-      t.setOrigin(0.5).setScrollFactor(0).setDepth(201).setAlpha(0);
+      t.setScrollFactor(0).setDepth(201).setAlpha(0);
       this.tweens.add({ targets: t, alpha: 1, delay: 4800 + i * 1200, duration: 1200 });
     });
     this.time.delayedCall(11000, () => {
@@ -3011,6 +3512,7 @@ class GameScene extends Phaser.Scene {
     this.updateTools(dt, time);
     for (const s of this.shades.getChildren().slice()) this.updateShade(s, dt, time);
     for (const b of this.bats.getChildren().slice()) this.updateBat(b, dt, time);
+    this.updateBoss(time);
     for (const v of this.veils) {
       v.tilePositionY -= dt * 20;
       v.tilePositionX = Math.sin(time / 300) * 3;
@@ -3050,34 +3552,22 @@ class HudScene extends Phaser.Scene {
       this.heartIcons.push(this.add.image(14 + i * 18, 14, 'heart', 0).setScale(2));
     }
     this.slotGfx = this.add.graphics();
-    this.slotIcons = TOOLS.map((t, i) => this.add.image(width - 86 + i * 28, 16, `tool_${t}`));
-    this.slotUnknown = TOOLS.map((_, i) =>
-      this.add.text(width - 86 + i * 28, 16, '?', { fontFamily: 'monospace', fontSize: '12px', color: '#8a8a8a' }).setOrigin(0.5),
-    );
-    this.toolLabel = this.add
-      .text(width - 12, 34, '', { fontFamily: 'monospace', fontSize: '10px', color: '#ffffff' })
-      .setOrigin(1, 0);
+    this.slotIcons = TOOLS.map((t, i) => this.add.image(width - 114 + i * 28, 16, `tool_${t}`));
+    this.slotUnknown = TOOLS.map((_, i) => label(this, width - 114 + i * 28, 16, '?', 0x8a8a8a));
+    this.bossHearts = [];
+    for (let i = 0; i < BOSS_HP; i++) this.bossHearts.push(this.add.image(width / 2 - 63 + i * 18, 14, 'heart', 0).setScale(2));
+    this.toolLabel = label(this, width - 12, 34, '').setOrigin(1, 0);
     this.panel = this.add.container(0, 0, [
       ...this.heartIcons,
       this.slotGfx,
       ...this.slotIcons,
       ...this.slotUnknown,
+      ...this.bossHearts,
       this.toolLabel,
     ]);
-    this.msg = this.add
-      .text(width / 2, height - 22, '', {
-        fontFamily: 'monospace',
-        fontSize: '11px',
-        color: '#ffffff',
-        backgroundColor: '#000000cc',
-        padding: { x: 6, y: 3 },
-      })
-      .setOrigin(0.5)
-      .setAlpha(0);
-    this.bigText = this.add
-      .text(width / 2, height / 2, '', { fontFamily: 'Georgia, serif', fontSize: '34px', color: '#ff1a1a', fontStyle: 'bold' })
-      .setOrigin(0.5)
-      .setAlpha(0);
+    this.msgBg = this.add.rectangle(0, height - 32, width, 20, 0, 0.8).setOrigin(0).setAlpha(0);
+    this.msg = label(this, width / 2, height - 22, '').setAlpha(0);
+    this.bigText = label(this, width / 2, height / 2, '', 0xff1a1a, 4).setAlpha(0);
     this.hideAt = this.time.now + HUD_LINGER;
   }
 
@@ -3086,9 +3576,9 @@ class HudScene extends Phaser.Scene {
   }
 
   showMessage(text, ms = 3500) {
-    this.msg.setText(text).setAlpha(1);
-    this.tweens.killTweensOf(this.msg);
-    this.tweens.add({ targets: this.msg, alpha: 0, delay: ms, duration: 600 });
+    const both = [this.msg.setText(text.toUpperCase()).setAlpha(1), this.msgBg.setAlpha(1)];
+    this.tweens.killTweensOf(both);
+    this.tweens.add({ targets: both, alpha: 0, delay: ms, duration: 600 });
   }
 
   big(text) {
@@ -3107,9 +3597,18 @@ class HudScene extends Phaser.Scene {
     const { width } = this.scale;
     const gr = this.slotGfx.clear();
     const dropped = new Set(g.pickups.getChildren().filter((i) => i.expires).map((i) => i.tool));
+    const b = g.boss && !g.boss.dying ? g.boss : null;
+    if (b) this.pulse();
+    this.bossHearts.forEach((h, i) => h.setVisible(!!b).setFrame(b && i < b.hp ? 0 : 1));
     TOOLS.forEach((t, i) => {
-      const x = width - 86 + i * 28;
+      const x = width - 114 + i * 28;
       const eq = g.equipped === t;
+      // The revolver's slot stays hidden until it is thrown to you.
+      if (i > 2 && !g.found.has(t)) {
+        this.slotUnknown[i].setVisible(false);
+        this.slotIcons[i].setVisible(false);
+        return;
+      }
       gr.fillStyle(0x0a0d12, 0.92).fillRect(x - 12, 4, 24, 24);
       gr.lineStyle(eq ? 2 : 1, eq ? 0xff2a2a : 0xc8d0d8, 1).strokeRect(x - 12, 4, 24, 24);
       const has = g.inventory.has(t);
@@ -3118,8 +3617,8 @@ class HudScene extends Phaser.Scene {
       this.slotIcons[i].setVisible(known);
       this.slotIcons[i].setAlpha(has ? 1 : dropped.has(t) ? (Math.floor(g.time.now / 150) % 2 ? 0.3 : 0.65) : 0.3);
     });
-    this.toolLabel.setText(g.equipped ? TOOL_NAMES[g.equipped] : 'EMPTY HANDS');
-    this.toolLabel.setColor(g.equipped ? '#ffffff' : '#ff3b3b');
+    this.toolLabel.setText(g.equipped ? TOOL_NAMES[g.equipped] : 'MANOS VACIAS');
+    this.toolLabel.setTint(g.equipped ? 0xffffff : 0xff3b3b);
 
     // Fade the panel out once the linger window lapses.
     const want = time < this.hideAt ? 1 : 0;
