@@ -1291,7 +1291,7 @@ function makeFx() {
 //
 // Route (each gate needs a tool):
 //   Graveyard ──veil(flashlight)──▶ Hillside ──climb──▶ Gallery (crowbar)
-//   Hillside floor ──cracked stone(crowbar)──▶ Crypt ──veil──▶ Umbrella ──shaft──▶ Hillside
+//   Hillside floor ──cracked stone(crowbar)──▶ Umbrella ──crypt, veil──▶ shaft ──▶ Hillside
 //   Gallery ──chasm(glide: umbrella)──▶ Church nave ──cracked retablo──▶ shaft ──vault(glide)──▶ ──veil──▶ Great Bell
 //
 // Entity coordinates are in tiles; `y` is the row the entity stands on
@@ -1424,11 +1424,11 @@ function buildWorld() {
   inside(36, 28, 87, 37);
   one('veil', 62, 28, 2, 8);
   e('shrine', 49, 36);
-  one('tool', 82, 36, UMBRELLA);
+  one('tool', 44, 36, UMBRELLA);
   e('shade', 52, 36, 77, 36);
   e('bat', 75, 31);
   e('candle', 40, 36, 65, 36, 80, 36);
-  e('stalagmite', 38, 36, 44, 36, 74, 36);
+  e('stalagmite', 38, 36, 74, 36, 82, 36);
   e('stalactite', 40, 28, 47, 28, 54, 28, 63, 28, 70, 28, 79, 28, 85, 28);
   // Shaft back up to the hillside.
   fill(85, 26, 87, 27, EMPTY);
