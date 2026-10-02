@@ -831,7 +831,7 @@ const FLAME = [
 .wrw
 ..r`,
 ];
-// full, empty
+// full, empty, half
 const HEART = [
   // .RR.RR
   // RrrRrrR
@@ -859,6 +859,19 @@ R#rR
 .4!.4
 ..4.4
 !.4`,
+  // .RR.44
+  // RrrR..4
+  // RrrR..4
+  // .Rrr.4
+  // ..Rr4
+  // ...R
+  `
+.RR.44
+RrrR..4
+RrrR..4
+.Rrr.4
+..Rr4
+!.R`,
 ];
 
 // Tile frames in the 'tiles' strip.
@@ -2497,10 +2510,11 @@ function hurt(srcX) {
   jolt(160, 0.012, 0.7);
   pulseHud();
 
-  // El Silbon goes straight for the heart; lesser things only knock the tool away.
-  if (equipped && !boss) dropTool(dir);
-  else if (--hearts <= 0) die();
-  else if (boss && hearts === 1 && !found.has(REVOLVER) && !thrown) throwRevolver();
+  // El Silbon goes straight for the heart; a held tool takes half the blow from lesser things and is knocked away.
+  const shielded = equipped && !boss;
+  if (shielded) dropTool(dir);
+  if ((hearts -= shielded ? 0.5 : 1) <= 0) die();
+  else if (boss && hearts <= 1 && !found.has(REVOLVER) && !thrown) throwRevolver();
   return true;
 }
 
@@ -3166,7 +3180,7 @@ const HudScene = {
     const dropped = pickups.getChildren().filter((i) => i.ex).map((i) => i.tc);
     const b = boss && !boss.dy && boss;
     if (b) pulseHud();
-    heartIcons.forEach((h, i) => h.setFrame(i < hearts ? 0 : 1));
+    heartIcons.forEach((h, i) => h.setFrame(hearts - i >= 1 ? 0 : hearts > i ? 2 : 1));
     bossHearts.forEach((h, i) => h.setVisible(!!b).setFrame(b && i < b.hp ? 0 : 1));
     TOOLS.forEach((t, i) => {
       const x = SCREEN_W - 126 + i * 28;
