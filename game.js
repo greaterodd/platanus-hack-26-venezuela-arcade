@@ -389,6 +389,14 @@ for (const e of 'o0c k00 10e 223 338 45a 58c 6c4 sc9 wff b0a f10 i16 l1a m1c n1e
   PAL[e[0]] = '#' + e.slice(1).padEnd(6, e.slice(1));
 }
 
+// Duplicate-pick outfits, one colour set per repeat: [base, shade, highlight].
+const VC = [null, ['#ff2a2a', '#801010', '#ff9a8a'], ['#3b6fe2', '#17306f', '#8ab0ff'], ['#e8e8e8', '#8a8a8a', '#ffffff']];
+// Which palette chars make up each character's clothes, and their role (0 base, 1 shade, 2 light).
+const CHILD_OUT = { Y: 0, y: 1, h: 2 };
+const SHADE_OUT = { 1: 0, 2: 1, 3: 2 };
+const SILBON_OUT = { z: 0, t: 1, 4: 2 };
+const CAMP_OUT = { F: 0, z: 1, 5: 2 };
+
 let textures; // the texture manager, set by makeArt
 let pen; // 2D context of the texture being drawn
 
@@ -913,18 +921,13 @@ function makeArt(scene) {
   for (const k in RECT_ART) fromCanvas(k, RECT_ART[k][0], RECT_ART[k][1], () => rects(RECT_ART[k][2]));
 
   // El Silbon: a gaunt, too-tall man under a wide hat, a sack of bones on his back. Two walk frames.
-  fromCanvas(
-    'silbon',
-    48,
-    56,
-    () => {
-      for (const i of [0, 1]) {
-        // sack, hat, face, coat, arms, then the legs in mid-stride
-        rects('41k59 t2n114q118287 48281 x29k2 B29k1 s9b66 k9b62 5ah41 z8i8g m9i6g t6j2kgj2k s6D22gD22 ' + ['t9y2mdy2m 48T41dT41', 't7y2mfy2m 46T41fT41'][i], i * 24);
-      }
-    },
-    2,
-  );
+  const silbonDraw = () => {
+    for (const i of [0, 1]) {
+      // sack, hat, face, coat, arms, then the legs in mid-stride
+      rects('41k59 t2n114q118287 48281 x29k2 B29k1 s9b66 k9b62 5ah41 z8i8g m9i6g t6j2kgj2k s6D22gD22 ' + ['t9y2mdy2m 48T41dT41', 't7y2mfy2m 46T41fT41'][i], i * 24);
+    }
+  };
+  fromCanvas('silbon', 48, 56, silbonDraw, 2);
 
   fromCanvas('eyes', 8, 4, () => {
     box('#ff000059', 0, 0, 8, 4);
@@ -934,6 +937,76 @@ function makeArt(scene) {
     rects('r01113111');
     box('#ff00004d', 0, 0, 5, 3);
   });
+  // EL LLANERO's bottle.
+  fromCanvas('bottle', 6, 14, () => {
+    box('#3a2a16', 2, 0, 2, 2); // cork
+    box('#2a6b38', 2, 2, 2, 3); // neck
+    box('#2f7a3f', 0, 5, 6, 9); // body
+    box('#7fd08f', 1, 5, 1, 7); // shine
+    box('#1e4d28', 5, 5, 1, 9); // shade
+  });
+  // Versus pickups: a soap bubble around a heart, an "x2", or a shield.
+  const vbub = (key, motif) =>
+    fromCanvas(key, 20, 20, () => {
+      pen.fillStyle = 'rgba(140,210,255,0.16)';
+      circle(10, 10, 9);
+      pen.lineWidth = 1.2;
+      pen.strokeStyle = 'rgba(200,240,255,0.9)';
+      pen.beginPath();
+      pen.arc(10, 10, 9, 0, PI * 2);
+      pen.stroke();
+      pen.strokeStyle = 'rgba(255,255,255,0.7)';
+      pen.beginPath();
+      pen.arc(10, 10, 5.5, PI * 0.7, PI * 1.3);
+      pen.stroke();
+      motif();
+    });
+  vbub('bub_h', () => {
+    pen.fillStyle = '#ff1a1a';
+    pen.beginPath();
+    pen.arc(7, 9, 3, 0, PI * 2);
+    pen.arc(13, 9, 3, 0, PI * 2);
+    pen.moveTo(4, 10);
+    pen.lineTo(10, 17);
+    pen.lineTo(16, 10);
+    pen.closePath();
+    pen.fill();
+  });
+  vbub('bub_x', () => {
+    pen.fillStyle = '#ffe066';
+    pen.font = 'bold 9px monospace';
+    pen.textAlign = 'center';
+    pen.textBaseline = 'middle';
+    pen.fillText('x2', 10, 10.5);
+  });
+  vbub('bub_s', () => {
+    pen.fillStyle = '#ffe066';
+    pen.beginPath();
+    pen.moveTo(10, 3);
+    pen.lineTo(15, 5.5);
+    pen.lineTo(15, 10);
+    pen.quadraticCurveTo(15, 15, 10, 17);
+    pen.quadraticCurveTo(5, 15, 5, 10);
+    pen.lineTo(5, 5.5);
+    pen.closePath();
+    pen.fill();
+  });
+
+  // Duplicate picks wear the same silhouette in a different colour: the palette
+  // swap recolours only the outfit chars, leaving skin, eyes and outline intact.
+  const withPal = (map, fn) => {
+    const old = {};
+    for (const s in map) old[s] = PAL[s];
+    for (let v = 1; v < 4; v++) {
+      for (const s in map) PAL[s] = VC[v][map[s]];
+      fn(v);
+    }
+    for (const s in map) PAL[s] = old[s];
+  };
+  withPal(CHILD_OUT, (v) => sheet('child' + v, CHILD_LEGS.map((l) => CHILD_BODY + l), 16, 24));
+  withPal(SHADE_OUT, (v) => sheet('shade' + v, SHADE_LEGS.map((l) => SHADE_TOP + l), 16, 32));
+  withPal(SILBON_OUT, (v) => fromCanvas('silbon' + v, 48, 56, silbonDraw, 2));
+  withPal(CAMP_OUT, (v) => fromCanvas('campesino' + v, 16, 26, () => rects(RECT_ART.campesino[2])));
 
   makeTiles();
   makeProps();
@@ -1730,6 +1803,14 @@ const BootScene = {
     anim('jump', 'child', [4], 1, 0);
     anim('walk', 'shade', [0, 1], 3);
     anim('stalk', 'silbon', [0, 1], 4);
+    // Duplicate-pick outfits reuse the same clips under a numeric suffix.
+    for (let v = 1; v < 4; v++) {
+      anim('idle' + v, 'child' + v, [0], 1, 0);
+      anim('run' + v, 'child' + v, [1, 2, 3, 2], 10);
+      anim('jump' + v, 'child' + v, [4], 1, 0);
+      anim('walk' + v, 'shade' + v, [0, 1], 3);
+      anim('stalk' + v, 'silbon' + v, [0, 1], 4);
+    }
     anim('fly', 'bat', [0, 1], 10);
     anim('flame', 'flame', [0, 1], 7);
 
@@ -1911,6 +1992,7 @@ const GLIDE_FALL = 36;
 const MAX_HEARTS = 3;
 const dropTime = () => 5000 / hard(); // how long a dropped tool waits on the ground
 const BASE_DARK = 0.8;
+const VEIL_OFFS = [-0.6, -0.3, 0, 0.3, 0.6]; // reused by the flashlight veil scan
 const HUD_LINGER = 4000; // ms the HUD stays up after a tool change or a hit
 const BOSS_HP = 6; // one for every chamber of the revolver
 const NEVER = -1e9;
@@ -1934,25 +2016,31 @@ const PROPS = {
 
 // Versus menu roster and the frames each fighter animates (main's Boot keys).
 const VROSTER = [
-  { k: 'child', n: 'EL CHAMO', tex: 'child', bw: 10, bh: 20, ox: 3, oy: 4, sp: 130, jp: 375 },
-  { k: 'silbon', n: 'EL SILBON', tex: 'silbon', bw: 10, bh: 42, ox: 7, oy: 14, sp: 118, jp: 385 },
-  { k: 'shade', n: 'EL ESPANTO', tex: 'shade', bw: 10, bh: 28, ox: 3, oy: 4, sp: 112, jp: 375 },
-  { k: 'campesino', n: 'EL CAMPESINO', tex: 'campesino', bw: 10, bh: 22, ox: 3, oy: 4, sp: 120, jp: 370 },
+  { k: 'child', n: 'EL CHAMO', tex: 'child', bw: 10, bh: 20, ox: 3, oy: 4, sp: 130, jp: 375, hh: 0, uh: 30 },
+  { k: 'silbon', n: 'EL SILBON', tex: 'silbon', bw: 10, bh: 42, ox: 7, oy: 14, sp: 118, jp: 385, hh: 42.5, uh: 62 },
+  { k: 'shade', n: 'EL ESPANTO', tex: 'shade', bw: 10, bh: 28, ox: 3, oy: 4, sp: 112, jp: 375, hh: 27.5, uh: 38 },
+  { k: 'campesino', n: 'EL LLANERO', tex: 'campesino', bw: 10, bh: 22, ox: 3, oy: 4, sp: 120, jp: 370, hh: 0, uh: 32 },
 ];
 const VANIM = { child: ['idle', 'run', 'jump'], silbon: ['stalk', 'stalk', 'stalk'], shade: ['walk', 'walk', 'walk'], campesino: null };
+const VHP = 6; // lives each fighter gets
 
 function buildVersusArena(scene) {
-  const AW = 40;
+  // The 40-tile play area is framed by decorative ground on both sides, so the
+  // winner's cinematic can centre a corner fighter without showing the void.
+  const OFF = 14;
+  const AW = 40 + OFF * 2;
   const AH = 30;
   const grid = Array.from({ length: AH }, (_, y) =>
-    Array.from({ length: AW }, (_, x) =>
-      y >= 28 || x === 0 || x === AW - 1 ? SOLID : (y === 24 && x >= 16 && x <= 23) || (y === 20 && ((x >= 5 && x <= 13) || (x >= 26 && x <= 34))) || (y === 16 && ((x >= 8 && x <= 11) || (x >= 28 && x <= 31))) ? BEAM : EMPTY,
-    ),
+    Array.from({ length: AW }, (_, x) => {
+      if (y >= 28) return SOLID; // no side walls: open ground edge to edge
+      const px = x - OFF;
+      return (y === 24 && px >= 16 && px <= 23) || (y === 20 && ((px >= 5 && px <= 13) || (px >= 26 && px <= 34))) || (y === 16 && ((px >= 8 && px <= 11) || (px >= 28 && px <= 31))) ? BEAM : EMPTY;
+    }),
   );
 
   const data = grid.map((row, y) => row.map((v, x) => (v === SOLID ? (y > 0 && grid[y - 1][x] !== SOLID ? TILE_STONE_TOP : TILE_STONE) : v === BEAM ? TILE_BEAM : -1)));
   const map = scene.make.tilemap({ data, tileWidth: T, tileHeight: T });
-  const layer = map.createLayer(0, map.addTilesetImage('tiles', 'tiles', T, T, 0, 0), 0, 0).setDepth(0);
+  const layer = map.createLayer(0, map.addTilesetImage('tiles', 'tiles', T, T, 0, 0), 0, 0).setDepth(0).setPosition(-OFF * T, 0);
   layer.setCollision([TILE_STONE, TILE_STONE_TOP]);
   layer.forEachTile((t) => {
     if (t.index === TILE_BEAM) t.setCollision(false, false, true, false);
@@ -1981,10 +2069,11 @@ function versusAI(f, foe, dt, time) {
     if (adx > 60) f.av = sign(dx) || f.fc;
     else if (adx < 26) f.av = random() < 0.45 ? -(sign(dx) || f.fc) : sign(dx) || f.fc;
     else f.av = random() < 0.7 ? sign(dx) || f.fc : 0;
-    if (adx < 34 && abs(dy) < 26 && time > f.ac && random() > 0.18) f.ia = true;
+    const rng = f.g.k === 'campesino' ? 250 : f.g.k === 'silbon' ? 175 : 34;
+    if (adx < rng && abs(dy) < (rng > 40 ? 120 : 26) && time > f.ac && random() > 0.18) f.ia = true;
   }
   f.ix = f.av || 0;
-  if (f.og && f.body && time > (f.aj || 0) && (dy < -30 || f.body.blocked.left || f.body.blocked.right || (adx > 120 && random() < dt / 4000))) {
+  if (f.og && f.body && time > (f.aj || 0) && (dy < -30 || f.body.blocked.left || f.body.blocked.right || (adx > 120 && random() < dt / 4))) {
     f.ij = true;
     f.aj = time + 450 + random() * 450;
   }
@@ -2246,14 +2335,23 @@ function buildDarkness() {
   dropBars = stage.add.graphics().setDepth(61);
 }
 
+const MON = []; // reused each call to avoid a fresh array every frame
 function monsters() {
-  return [...shades.getChildren(), ...bats.getChildren()];
+  MON.length = 0;
+  const a = shades.getChildren();
+  const b = bats.getChildren();
+  for (let i = 0; i < a.length; i++) MON.push(a[i]);
+  for (let i = 0; i < b.length; i++) MON.push(b[i]);
+  return MON;
 }
 
 function tileAt(px, py) {
   const tx = floor(px / T);
   const ty = floor(py / T);
-  return tx < 0 || ty < 0 || tx >= W || ty >= H || crackedAt.has(tx + ',' + ty) ? SOLID : world.grid[ty][tx];
+  if (tx < 0 || ty < 0 || tx >= W || ty >= H) return SOLID;
+  const v = world.grid[ty][tx];
+  if (v === SOLID) return SOLID; // no string key on the common case
+  return crackedAt.has(tx + ',' + ty) ? SOLID : v;
 }
 
 // Solid ground or a beam: something to stand on.
@@ -2487,7 +2585,7 @@ function shineCone(cone, dt) {
   for (const v of veils) {
     if (v.sn <= 0) continue;
     let lit = false;
-    for (const off of [-0.6, -0.3, 0, 0.3, 0.6]) {
+    for (const off of VEIL_OFFS) {
       const a = cone.angle + off * cone.half;
       for (let d = 8; d < cone.range && !lit; d += 8) {
         const x = cone.x + cos(a) * d;
@@ -2584,35 +2682,32 @@ function updateShade(s, dt, time) {
   s.setAlpha(burning ? 0.6 + random() * 0.4 : 1);
 }
 
+// Fly towards (or with a negative speed, away from) a point.
+const batFly = (b, x, y, speed) => b.setVelocity(cos(atan2(y - b.y, x - b.x)) * speed, sin(atan2(y - b.y, x - b.x)) * speed);
+const batGo = (b, mode, ms, time) => {
+  b.md = mode;
+  b.mu = time + ms;
+};
+
 function updateBat(b, dt, time) {
   b.t += dt;
   const px = player.x;
   const py = player.y - 12;
-  // Fly towards (or with a negative speed, away from) a point.
-  const fly = (x, y, speed) => {
-    const a = atan2(y - b.y, x - b.x);
-    b.setVelocity(cos(a) * speed, sin(a) * speed);
-  };
-  const go = (mode, ms) => {
-    b.md = mode;
-    b.mu = time + ms;
-  };
-
   if (b.br > 0) {
-    go('return', 1200);
-    fly(px, py, -120);
+    batGo(b, 'return', 1200, time);
+    batFly(b, px, py, -120);
   } else if (b.md === 'hover') {
     b.setVelocity((b.hm.x + sin(b.t * 1.3) * 34 - b.x) * 3, (b.hm.y + sin(b.t * 2.7) * 10 - b.y) * 3);
     if (!dead && hypot(b.x - px, b.y - py) < 150 && time > b.mu && lineOfSight(b.x, b.y, px, py)) {
-      go('dive', 900);
-      fly(px, py, 165 * hard());
+      batGo(b, 'dive', 900, time);
+      batFly(b, px, py, 165 * hard());
       sound(sndScreech);
     }
   } else if (b.md === 'dive') {
-    if (time > b.mu) go('return', 1500);
+    if (time > b.mu) batGo(b, 'return', 1500, time);
   } else {
-    fly(b.hm.x, b.hm.y, 90);
-    if (hypot(b.x - b.hm.x, b.y - b.hm.y) < 10 || time > b.mu) go('hover', 1500);
+    batFly(b, b.hm.x, b.hm.y, 90);
+    if (hypot(b.x - b.hm.x, b.y - b.hm.y) < 10 || time > b.mu) batGo(b, 'hover', 1500, time);
   }
   b.setFlipX(b.body.velocity.x < 0);
   b.ey.setPosition(b.x, b.y + 1.5);
@@ -2805,9 +2900,17 @@ function updatePlayer(dt, time) {
   if (!boss && bellZone.contains(p.x, p.y - 10)) silbonIntro();
 }
 
+const DROPPED = []; // reused each frame so the HUD allocates no arrays
+function droppedTools() {
+  DROPPED.length = 0;
+  const cs = pickups.getChildren();
+  for (let i = 0; i < cs.length; i++) if (cs[i].ex) DROPPED.push(cs[i].tc);
+  return DROPPED;
+}
+
 function updatePickups(time) {
   const bars = dropBars.clear();
-  for (const item of [...pickups.getChildren()]) {
+  for (const item of pickups.getChildren()) {
     const left = item.ex - time;
     const urgent = left < 2000;
     if (item.gw) {
@@ -2837,14 +2940,23 @@ function updateRainSplashes() {
   }
 }
 
+// Reused stamp configs: Phaser reads them synchronously, so one object is enough.
+const LS = { scale: 1, alpha: 1, erase: true };
+const CS = { originX: 0, originY: 0.5, scaleX: 1, scaleY: 1, rotation: 0, alpha: 1, erase: true };
+function lightAt(dark, sx, sy, x, y, r, alpha) {
+  if (x + r > sx && x - r < sx + SCREEN_W && y + r > sy && y - r < sy + SCREEN_H) {
+    LS.scale = r / 64;
+    LS.alpha = alpha;
+    dark.stamp('light', null, x - sx, y - sy, LS);
+  }
+}
+
 function updateDarkness(time) {
   const sx = cam.scrollX;
   const sy = cam.scrollY;
   const dark = darkness;
   const flash = stormLevel;
-  const light = (x, y, r, alpha = 1) => {
-    if (x + r > sx && x - r < sx + SCREEN_W && y + r > sy && y - r < sy + SCREEN_H) dark.stamp('light', null, x - sx, y - sy, { scale: r / 64, alpha, erase: true });
-  };
+  const light = (x, y, r, alpha = 1) => lightAt(dark, sx, sy, x, y, r, alpha);
 
   dark.clear();
   dark.fill(0, max(0.32, min(0.95, BASE_DARK + night * 0.03) * (boss ? 0.6 : 1) * (1 - 0.93 * min(1, flash * 1.4))));
@@ -2871,7 +2983,11 @@ function updateDarkness(time) {
     // The cone texture is 256px long with a 0.42 rad half-angle; stretch it to fit.
     const scaleX = c.range / 256;
     const scaleY = scaleX * (tan(c.half) / tan(0.42));
-    dark.stamp('cone', null, c.x - sx, c.y - sy, { originX: 0, originY: 0.5, scaleX, scaleY, rotation: c.angle, alpha: flicker, erase: true });
+    CS.scaleX = scaleX;
+    CS.scaleY = scaleY;
+    CS.rotation = c.angle;
+    CS.alpha = flicker;
+    dark.stamp('cone', null, c.x - sx, c.y - sy, CS);
     coneGlow
       .setPosition(c.x, c.y)
       .setScale(scaleX, scaleY)
@@ -3000,10 +3116,6 @@ function updateBoss(time) {
   const dx = player.x - b.x;
   const dir = sign(dx) || 1;
   const rage = b.hp <= BOSS_HP / 2;
-  const walk = (ms) => {
-    b.md = 'walk';
-    b.na = time + ms;
-  };
   if (cutscene || dead) {
     b.setVelocityX(0);
   } else if (b.md === 'walk') {
@@ -3016,7 +3128,10 @@ function updateBoss(time) {
       sweep(SINE, 520, b.lu ? 1040 : 780, 0.35, 0.09);
     }
   } else if (time > b.un) {
-    if (b.md !== 'tell') walk(rage ? 1100 : 1600);
+    if (b.md !== 'tell') {
+      b.md = 'walk';
+      b.na = time + (rage ? 1100 : 1600);
+    }
     else if (b.lu) {
       b.md = 'lunge';
       b.un = time + 520;
@@ -3031,7 +3146,8 @@ function updateBoss(time) {
           .setAngularVelocity(500);
       }
       sound(sndSwing);
-      walk(rage ? 1300 : 1900);
+      b.md = 'walk';
+      b.na = time + (rage ? 1300 : 1900);
     }
   }
   b.anims.timeScale = b.md === 'walk' ? (rage ? 2 : 1) : 0;
@@ -3299,7 +3415,7 @@ const HudScene = {
     if (!player) return;
 
     const gr = slotGfx.clear();
-    const dropped = pickups.getChildren().filter((i) => i.ex).map((i) => i.tc);
+    const dropped = droppedTools();
     const b = boss && !boss.dy && boss;
     if (b) pulseHud();
     heartIcons.forEach((h, i) => h.setFrame(i < hearts ? 0 : 1));
@@ -3324,53 +3440,112 @@ const HudScene = {
 
 // Versus: the llanos staged as a duel. All state and helpers live at module
 // level so every name stays mangleable, exactly like the story scenes.
-let vCam, vLayer, vItems, vCols, vUI, vNavItems, vMode, vSel, vPC, vP1c, vP2c, vLk1, vLk2, vCards, vRect1, vRect2, vF1, vF2, vHearts, vOver, vNextAt;
+let vCam, vLayer, vBones, vCols, vUI, vNavItems, vMode, vSel, vPC, v2v2, vPk, vLk, vCards, vRects, vA, vB, vHearts, vOver, vCin, vWinAt, vBanner, vRoll, vAiT, vAiN, vRollAt, vNavT, vBub, vBubAt, vPauseAt;
+
+// Teams: vA are the players (side 1), vB the rivals (side 2, PC unless the duel
+// is 2 players). Every fight, duel or 2v2, runs through these two arrays.
+const vFoes = (f) => (f.s === 1 ? vB : vA);
+// Nearest living enemy, cached in f.tg so the AI keeps its mark instead of
+// flip-flopping between two equidistant foes.
+function vTarget(f) {
+  if (f.tg && !f.tg.dy) return f.tg;
+  let best, bd = Infinity;
+  for (const o of vFoes(f)) {
+    if (o.dy) continue;
+    const d = abs(o.x - f.x) + abs(o.y - f.y);
+    if (d < bd) { bd = d; best = o; }
+  }
+  return (f.tg = best);
+}
 
 const vNext = (i, dx, dy) => max(0, min(1, floor(i / 2) + dy)) * 2 + max(0, min(1, (i % 2) + dx));
+
+// El menú de resultado se dibuja en espacio de pantalla aunque la cámara tenga zoom Z:
+// un punto de pantalla p cae en midPoint + (p - centro)/Z y se escala a 1/Z.
+const vUx = (x) => vCam.midPoint.x + (x - SCREEN_W / 2) / vCam.zoom;
+const vUy = (y) => vCam.midPoint.y + (y - SCREEN_H / 2) / vCam.zoom;
+const vUs = (s = 1) => s / vCam.zoom;
+const vRect = (x, y, w, h, c, a, d) => stage.add.rectangle(vUx(x), vUy(y), w, h, c, a).setScale(vUs()).setStrokeStyle(1, 0x2b3648).setDepth(d);
+const vLab = (x, y, t, c, s, d) => label(stage, vUx(x), vUy(y), t, c, s).setScale(vUs()).setDepth(d);
+
+// Vuelve la cámara a 1x centrada (glitch y vignette son postFX, no se tocan).
+function vResetView() {
+  vCam.setBounds(0, 0, SCREEN_W, SCREEN_H);
+  vCam.setZoom(1);
+  vCam.centerOn(SCREEN_W / 2, SCREEN_H / 2);
+}
+
+// Quita el menú y reanuda la MISMA pelea conservando peleadores y HP (pausa/reanudar).
+function vResume() {
+  // The scene clock kept running while paused: push the power and bubble timers
+  // forward by the pause length so nothing silently expires in the menu.
+  const d = clock() - vPauseAt;
+  for (const f of [...(vA || []), ...(vB || [])]) {
+    if (f.q2) f.q2 += d;
+    if (f.sd) f.sd += d;
+  }
+  if (vBub) for (const b of vBub) b.ex += d;
+  vBubAt += d;
+  vClearUI();
+  vOver = null;
+  vCin = 0;
+  vWinAt = 0;
+  vMode = 2;
+  vResetView();
+  stage.physics.resume();
+  clearTaps();
+}
 
 function vClearUI() {
   vUI.forEach((o) => o.destroy());
   vUI = [];
+  vNavItems = null;
 }
 
 function vMenu() {
+  vResetView();
+  stage.physics.resume();
   vClearUI();
   vMakeClear();
   vMode = 0;
   vSel = 0;
   vUI = [
-    stage.add.rectangle(320, 280, 440, 190, 0x0e1320, 0.82).setStrokeStyle(1, 0x2b3648).setDepth(1),
+    stage.add.rectangle(320, 280, 470, 214, 0x0e1320, 0.82).setStrokeStyle(1, 0x2b3648).setDepth(1),
     label(stage, 320, 150, 'VERSUS', 0xff1a1a, 4).setDepth(20),
   ];
-  vNavItems = ['1 JUGADOR VS PC', '2 JUGADORES', 'VOLVER AL INICIO'].map((t, i) => label(stage, 320, 240 + i * 40, t, 0xffffff, 2).setDepth(20));
+  vNavItems = ['1 JUGADOR VS PC', '2 JUGADORES', '2 JUGADORES VS PC', 'VOLVER AL INICIO'].map((t, i) => label(stage, 320, 230 + i * 36, t, 0xffffff, 2).setDepth(20));
   vUI.push(...vNavItems);
 }
 
+// Navega cualquier menú (principal o resultado). Devuelve el índice confirmado o -1.
 function vNavUpdate() {
+  if (!vNavItems) return -1;
   if (tap(B_UP) || tap(C2U)) {
-    vSel = (vSel + 2) % 3;
+    vSel = (vSel + vNavItems.length - 1) % vNavItems.length;
     sound(sndPoke);
   }
   if (tap(B_DOWN) || tap(C2D)) {
-    vSel = (vSel + 1) % 3;
+    vSel = (vSel + 1) % vNavItems.length;
     sound(sndPoke);
   }
   vNavItems.forEach((t, i) => t.setTint(i === vSel ? 0xffffff : 0xb8b8b8));
-  if (tap(B_USE) || tap(ST1)) {
+  if (tap(B_USE) || tap(ST1) || tap(C2A)) {
     clearTaps();
-    return true;
+    return vSel;
   }
-  return false;
+  return -1;
 }
 
 function vSelect() {
+  vResetView();
+  stage.physics.resume();
   vMakeClear();
   vClearUI();
   vMode = 1;
-  vP1c = 0;
-  vP2c = vPC ? between(0, 3) : 0;
-  vLk1 = false;
-  vLk2 = !!vPC;
+  vPk = [0, 1, 2, 3]; // cursors start on different cards instead of stacked
+  vLk = [false, false, false, false];
+  vRoll = vAiN = vRollAt = 0;
+  vAiT = [];
   vCards = VROSTER.map((r, i) => {
     const x = 320 + ((i % 2) - 0.5) * 122;
     const y = 216 + (floor(i / 2) - 0.5) * 98;
@@ -3378,51 +3553,86 @@ function vSelect() {
     s.setScale(64 / s.height);
     return { x, y, s, n: label(stage, x, y + 44, r.n, 0xffffff).setDepth(20) };
   });
-  vRect1 = stage.add.rectangle(0, 0, 78, 78, 0, 0).setStrokeStyle(2, 0xff2a2a).setDepth(6);
-  vRect2 = stage.add.rectangle(0, 0, 78, 78, 0, 0).setStrokeStyle(2, 0xffffff).setDepth(6);
-  vUI = [stage.add.rectangle(320, 216, 300, 260, 0x0e1320, 0.82).setStrokeStyle(1, 0x2b3648).setDepth(1), ...vCards.flatMap((g) => [g.s, g.n]), vRect1, vRect2];
+  // Cursors: P1 red, P2 yellow, the two CPU picks white (only during the roll).
+  vRects = [0xff2a2a, 0xffe066, 0xffffff, 0xffffff].map((c) => stage.add.rectangle(0, 0, 78, 78, 0, 0).setStrokeStyle(2, c).setDepth(6));
+  vUI = [stage.add.rectangle(320, 216, 300, 260, 0x0e1320, 0.82).setStrokeStyle(1, 0x2b3648).setDepth(1), ...vCards.flatMap((g) => [g.s, g.n]), ...vRects];
 }
 
 function vSelectUpdate() {
   if (tap(B_PREV)) return vMenu();
-  if (!vLk1) {
-    if (tap(B_LEFT)) vP1c = vNext(vP1c, -1, 0);
-    if (tap(B_RIGHT)) vP1c = vNext(vP1c, 1, 0);
-    if (tap(B_UP)) vP1c = vNext(vP1c, 0, -1);
-    if (tap(B_DOWN)) vP1c = vNext(vP1c, 0, 1);
+  const t = clock();
+  // Human picks: P1 always, P2 in a duel or in 2v2. The CPU drafts the rest.
+  const humans = v2v2 ? 2 : vPC ? 1 : 2;
+  const ais = v2v2 ? 2 : vPC ? 1 : 0;
+  if (!vLk[0]) {
+    if (tap(B_LEFT)) vPk[0] = vNext(vPk[0], -1, 0);
+    if (tap(B_RIGHT)) vPk[0] = vNext(vPk[0], 1, 0);
+    if (tap(B_UP)) vPk[0] = vNext(vPk[0], 0, -1);
+    if (tap(B_DOWN)) vPk[0] = vNext(vPk[0], 0, 1);
     if (tap(B_USE) || tap(ST1)) {
-      vLk1 = true;
+      vLk[0] = true;
       sound(sndCheckpoint);
     }
-  }
-  if (!vPC && !vLk2) {
-    if (tap(C2L)) vP2c = vNext(vP2c, -1, 0);
-    if (tap(C2R)) vP2c = vNext(vP2c, 1, 0);
-    if (tap(C2U)) vP2c = vNext(vP2c, 0, -1);
-    if (tap(C2D)) vP2c = vNext(vP2c, 0, 1);
+  } else if (humans > 1 && !vLk[1]) {
+    if (tap(C2L)) vPk[1] = vNext(vPk[1], -1, 0);
+    if (tap(C2R)) vPk[1] = vNext(vPk[1], 1, 0);
+    if (tap(C2U)) vPk[1] = vNext(vPk[1], 0, -1);
+    if (tap(C2D)) vPk[1] = vNext(vPk[1], 0, 1);
     if (tap(C2A) || tap(ST2)) {
-      vLk2 = true;
+      vLk[1] = true;
       sound(sndCheckpoint);
     }
   }
-  vRect1.setPosition(vCards[vP1c].x, vCards[vP1c].y).setAlpha(vLk1 ? 1 : 0.55);
-  vRect2.setPosition(vCards[vP2c].x, vCards[vP2c].y).setAlpha(vLk2 ? 1 : 0.55);
-  if (vLk1 && vLk2) {
+  // The machine keeps its picks hidden, then rolls through the roster one slot
+  // at a time (2v2 drafts two distinct fighters).
+  if (vPC && vLk[humans - 1] && vAiN < ais) {
+    if (!vAiT.length) {
+      vAiT = [0, 1, 2, 3].sort(() => random() - 0.5);
+      vRoll = 15;
+      vRollAt = t + 120;
+      vPk[2 + vAiN] = (vAiT[vAiN] + 1) % VROSTER.length;
+    } else if (vRoll > 0) {
+      if (t >= vRollAt) {
+        vRoll--;
+        vPk[2 + vAiN] = (vPk[2 + vAiN] + 1) % VROSTER.length;
+        sound(sndPoke);
+        vRollAt = t + (vRoll ? 30 + (15 - vRoll) * 8 : 260);
+      }
+    } else if (t >= vRollAt) {
+      vPk[2 + vAiN] = vAiT[vAiN];
+      vLk[2 + vAiN] = true;
+      sound(sndCheckpoint);
+      vAiN++;
+      if (vAiN < ais) {
+        vRoll = 15;
+        vRollAt = t + 120;
+      }
+    }
+  }
+  // The machine's boxes stay hidden until its roulette actually starts.
+  const rolled = vAiT.length > 0;
+  const show = [true, humans > 1, ais > 0 && rolled, ais > 1 && vAiN >= 1];
+  vRects.forEach((r, i) => {
+    r.setPosition(vCards[vPk[i]].x, vCards[vPk[i]].y).setAlpha(vLk[i] ? 1 : 0.55).setVisible(show[i]);
+  });
+  if (vLk[0] && (humans < 2 || vLk[1]) && vAiN >= ais) {
     clearTaps();
     vFight();
   }
 }
 
-function vFighter(side, ci, x) {
+function vFighter(side, ci, x, ctrl, vs) {
   const r = VROSTER[ci];
-  const f = stage.physics.add.sprite(x, 27 * T, r.tex, 0);
+  const f = stage.physics.add.sprite(x, 27 * T, r.tex + (vs || ''), 0);
   f.setOrigin(0.5, 1).setDepth(10).setCollideWorldBounds(true);
   f.body.setSize(r.bw, r.bh).setOffset(r.ox, r.oy).setMaxVelocityY(620);
   f.g = r;
   f.s = side;
-  f.hp = 3;
+  f.ct = ctrl; // 0 = P1, 1 = P2, 2 = the machine
+  f.vs = vs ? '' + vs : ''; // duplicate-pick outfit suffix ('' | 1 | 2 | 3)
+  f.hp = VHP;
   f.fc = side === 1 ? 1 : -1;
-  f.hm = side === 1 || !vPC;
+  f.hm = ctrl < 2;
   f.ax = f.fc;
   f.ay = 0;
   f.aa = f.fc > 0 ? 0 : PI;
@@ -3431,125 +3641,189 @@ function vFighter(side, ci, x) {
   f.ij = false;
   f.ia = false;
   f.av = f.fc;
-  f.it = f.aj = f.ac = f.sn = f.su = f.iu = 0;
+  f.dy = false;
+  f.it = f.aj = f.ac = f.sn = f.su = f.iu = f.sw = f.cg = 0;
   f.jp = f.lg = NEVER;
-  f.t = null;
+  f.q2 = f.sd = 0; // x2-action and shield timers
+  f.dg = 0; // the charge currently deals double damage
+  // Held weapon: crowbar for EL CHAMO, revolver for EL LLANERO, fists for the rest.
+  f.wt = r.k === 'child' ? CROWBAR : r.k === 'campesino' ? REVOLVER : 0;
   f.og = false;
-  f.hl = image(stage, x, 27 * T, 'tool_' + FLASHLIGHT, 11, 0.5, 0.5, 0).setVisible(false);
-  f.co = image(stage, x, 27 * T, 'cone', 45, 0, 0.5).setBlendMode(1).setVisible(false);
+  f.hl = image(stage, x, 27 * T, 'tool_' + (f.wt || CROWBAR), 11, 0.5, 0.5, 0).setVisible(false);
+  f.um = image(stage, x, 27 * T, 'umbrella_open', 11, 0.5, 0.5, 0).setVisible(false);
+  // Shield aura: the same warm tool glow from the story, wrapped right around him.
+  f.au = image(stage, x, 27 * T, 'light', 9).setBlendMode(1).setTint(0xffe066).setVisible(false);
+  f.qx = label(stage, x, 27 * T, 'X2', 0xffe066).setDepth(30).setVisible(false);
   if (r.k === 'silbon' || r.k === 'shade') f.ey = image(stage, x, 27 * T, 'eyes', 60);
   vCols.push(stage.physics.add.collider(f, vLayer));
-  vCols.push(stage.physics.add.overlap(f, vItems, (_, it) => vPick(f, it)));
+  vCols.push(stage.physics.add.overlap(f, vBones, (_, b) => vBoneHit(b, f)));
   return f;
 }
 
 function vMakeClear() {
+  if (vBones) vBones.clear(true, true);
   vCols.forEach((c) => c.destroy());
   vCols = [];
-  for (const f of [vF1, vF2])
-    if (f) {
-      if (f.hl) f.hl.destroy();
-      if (f.co) f.co.destroy();
-      if (f.ey) f.ey.destroy();
-      f.destroy();
-    }
-  vF1 = vF2 = null;
-  [...vItems.getChildren()].forEach((it) => it.destroy());
+  for (const f of [...(vA || []), ...(vB || [])]) {
+    for (const o of [f.hl, f.um, f.ey, f.au, f.qx]) o && o.destroy();
+    f.destroy();
+  }
+  vA = vB = null;
   if (vHearts) {
     vHearts.forEach((o) => o.destroy());
     vHearts = null;
   }
+  if (vBub) {
+    vBub.forEach((b) => b.destroy());
+    vBub = null;
+  }
 }
 
 function vFight() {
+  vResetView();
+  stage.physics.resume();
   vMakeClear();
   vClearUI();
   vMode = 2;
   vOver = null;
-  vF1 = vFighter(1, vP1c, 90);
-  vF2 = vFighter(2, vP2c, 550);
-  vHearts = [];
-  for (let i = 0; i < 3; i++) {
-    vHearts.push(image(stage, 16 + i * 18, 16, 'heart', 40).setScale(2));
-    vHearts.push(image(stage, 624 - i * 18, 16, 'heart', 40).setScale(2));
+  vCin = 0;
+  // Team A (players, side 1) always fights Team B (side 2). In a duel each side
+  // has one fighter; in 2v2 the players' second pick faces the CPU's second.
+  // How many earlier picks already took this character, so repeats change colour.
+  const occ = (i) => vPk.slice(0, i).filter((p) => p === vPk[i]).length;
+  vA = [vFighter(1, vPk[0], 90, 0, occ(0))];
+  vB = [vFighter(2, vPk[vPC ? 2 : 1], 550, vPC ? 2 : 1, occ(vPC ? 2 : 1))];
+  if (v2v2) {
+    vA.push(vFighter(1, vPk[1], 140, 1, occ(1)));
+    vB.push(vFighter(2, vPk[3], 500, 2, occ(3)));
   }
-  vNextAt = stage.time.now + 2000;
+  const fs = vA.concat(vB);
+  for (let i = 0; i < fs.length; i++) for (let j = i + 1; j < fs.length; j++) vCols.push(stage.physics.add.collider(fs[i], fs[j]));
+  // Two heart rows per team: the first fighter on top, a second one below.
+  vHearts = [];
+  for (const team of [vA, vB])
+    team.forEach((f, row) => {
+      f.ht = [];
+      for (let i = 0; i < VHP; i++) {
+        const h = image(stage, f.s === 1 ? 13 + i * 15 : 627 - i * 15, 15 + row * 15, 'heart', 40).setScale(1.5);
+        f.ht.push(h);
+        vHearts.push(h);
+      }
+    });
+  vBub = [];
+  vBubAt = clock() + 4000;
+  vPauseAt = 0;
   clearTaps();
 }
 
-function vTool(tc, x, y, vx, vy) {
-  const p = vItems.create(x, y, 'tool_' + tc).setDepth(14).setBounce(0.3).setScale(1.7).setVelocity(vx || 0, vy || 0);
-  p.body.setSize(16, 16).setGravityY(-760).setMaxVelocityY(90);
-  p.tc = tc;
-  p.gw = image(stage, x, y, 'light', 45).setBlendMode(1).setScale(0.8).setAlpha(0.22).setTint(0xffe066);
-  if (p.preFX) p.preFX.addGlow(0xffe066, 3, 0, false, 0.08, 18);
-  p.once('destroy', () => p.gw.destroy());
+// Land a blow on every living enemy inside `box` (never a teammate).
+const vHitBox = (f, box, dmg, pierce) => {
+  if (vOver) return;
+  for (const o of vFoes(f)) if (!o.dy && Intersects.RectangleToRectangle(box, o.getBounds())) vHurt(f, o, f.ax || f.fc, dmg, pierce);
+};
+
+// EL CHAMO: pata de cabra; heavy overhead sweep (aimBox 30x46). The x2 power
+// chains a second, quicker sweep.
+function vSwing(f, t, x2) {
+  f.ac = t + (x2 ? 360 : 460);
+  f.sw = t + 260;
+  sound(sndSwing);
+  vHitBox(f, aimBox(f.x, f.y, f.ax, f.ay, 30, 46), 1);
+  if (x2)
+    later(140, () => {
+      if (f.dy || vOver || vCin) return;
+      f.sw = clock() + 220;
+      sound(sndSwing);
+      vHitBox(f, aimBox(f.x, f.y, f.ax, f.ay, 30, 46), 1, true); // pierces i-frames
+    });
 }
 
-function vSpawn(t) {
-  if (vOver || vItems.getLength() >= 3 || t < vNextAt) return;
-  vNextAt = t + between(7000, 12000);
-  vTool(TOOLS[between(0, 3)], between(40, 600), -12, 0, 0);
-}
-
-function vPick(f, it) {
-  if (!it.active || vOver) return;
-  f.t = it.tc;
-  sound(sndPickup);
-  it.destroy();
-}
-
-function vDrop(f, dir) {
-  const t = f.t;
-  f.t = null;
-  vTool(t, f.x, f.y - 16, -dir * between(40, 90), -200);
-}
-
-function vTorch(f, foe, t) {
-  const a = f.aa;
-  f.co.setVisible(true).setPosition(f.x + cos(a) * 10, f.y - 12 + sin(a) * 10).setRotation(a);
-  if (foe && !vOver && foe.g.k === 'shade' && t > f.ac) {
-    const dx = foe.x - f.x;
-    const dy = foe.y - f.y;
-    if (hypot(dx, dy) < 190 && abs(Phaser.Math.Angle.Wrap(atan2(dy, dx) - a)) < 0.42) {
-      f.ac = t + 700;
-      vHurt(f, foe, f.ax || f.fc);
-    }
+// EL LLANERO: throws a bottle that smashes on contact. The x2 power throws two,
+// a touch faster.
+function vThrow(f, t, x2) {
+  f.ac = t + (x2 ? 400 : 620);
+  f.sw = t + 140;
+  sound(sndSwing);
+  const n = x2 ? 2 : 1;
+  for (let i = 0; i < n; i++) {
+    const a = f.aa + (n > 1 ? (i - 0.5) * 0.18 : 0);
+    const b = vBones.create(f.x + cos(a) * 10, f.y - 18, 'bottle').setDepth(14).setScale(1.4).setAngularVelocity(700);
+    b.ow = f;
+    b.setVelocity(cos(a) * 320, sin(a) * 320 - 120);
   }
 }
 
-function vAttack(f, foe, t) {
-  const w = f.t;
+// EL SILBON: scatters bones from his sack, like the story boss. The x2 power
+// doubles the volley into a wide fan.
+function vBone(f, t, x2) {
+  f.ac = t + 640;
+  sound(sndSwing);
   const a = f.aa;
-  f.ac = t + (w === REVOLVER ? 520 : w === CROWBAR ? 420 : 360);
-  if (w === REVOLVER) {
-    sound(sndShot);
-    vCam.shake(60, 0.005);
-    const x0 = f.x + cos(a) * 14;
-    const y0 = f.y - 12 + sin(a) * 14;
-    const ln = new Line(x0, y0, x0 + cos(a) * 420, y0 + sin(a) * 420);
-    const tr = stage.add.graphics().setDepth(30).lineStyle(1, 0xffffff, 0.9).strokeLineShape(ln);
-    later(50, () => tr.destroy());
-    if (foe && !vOver && Intersects.LineToRectangle(ln, foe.getBounds())) vHurt(f, foe, sign(cos(a)) || f.fc);
+  const n = x2 ? 6 : 3;
+  for (let i = 0; i < n; i++) {
+    const s = 0.7 + (i / n) * 1.1;
+    const a2 = a + (x2 ? (i - (n - 1) / 2) * 0.16 : 0);
+    const b = vBones.create(f.x, f.y - 40, 'bone').setDepth(14).setScale(1.5).setAngularVelocity(500);
+    b.ow = f;
+    b.setVelocity(cos(a2) * 240 * s, sin(a2) * 240 * s - 160);
+  }
+}
+
+function vBoneHit(b, f) {
+  const o = b.ow;
+  if (!b.active || !o || o.dy || o === f || f.dy || f.s === o.s || vOver || vCin) return;
+  b.destroy();
+  vHurt(o, f, o.fc);
+}
+
+// EL ESPANTO: embestir, a dash along aim with brief immunity; contact hurts.
+// The x2 power adds a fast reverse pass that deals double damage.
+function vCharge(f, t, x2) {
+  f.ac = t + (x2 ? 720 : 560);
+  f.sn = t + 260;
+  f.iu = t + 240;
+  f.cg = t + 260;
+  const a = f.aa;
+  f.setVelocity(cos(a) * 420, sin(a) * 240 - 80);
+  sound(sndScreech);
+  if (!x2) return;
+  later(280, () => {
+    if (f.dy || vOver || vCin) return;
+    f.iu = clock() + 200;
+    f.cg = clock() + 240;
+    f.sn = clock() + 240; // keep steering from cancelling the reverse dash
+    f.dg = 1;
+    f.setVelocity(-cos(a) * 560, -sin(a) * 220 - 60);
+    sound(sndScreech);
+  });
+}
+
+// One intrinsic attack per fighter, on BOTON 1, aimed with f.ax/f.ay/f.aa.
+// With the x2 bubble active the single press unleashes the powered version.
+function vAtk(f, t) {
+  const k = f.g.k;
+  const x2 = t < f.q2;
+  f.dg = 0;
+  if (k === 'child') vSwing(f, t, x2);
+  else if (k === 'campesino') vThrow(f, t, x2);
+  else if (k === 'silbon') vBone(f, t, x2);
+  else vCharge(f, t, x2);
+}
+
+function vHurt(a, v, dir, dmg = 1, pierce) {
+  const t = stage.time.now;
+  if (vOver || vCin || (t < v.iu && !pierce)) return;
+  if (t < v.sd) {
+    sound(sndClang); // the shield bubble soaks it up
     return;
   }
-  sound(w === CROWBAR ? sndSwing : sndPoke);
-  const box = w === CROWBAR ? aimBox(f.x, f.y, f.ax, f.ay, 30, 46) : w === UMBRELLA ? aimBox(f.x, f.y, f.ax, f.ay, 26, 16) : aimBox(f.x, f.y, f.ax, f.ay, 24, 18);
-  const sw = stage.add.rectangle(box.centerX, box.centerY, box.width, 3, 0xffffff, 0.55).setDepth(30).setRotation(a);
-  later(160, () => sw.destroy());
-  if (foe && !vOver && Intersects.RectangleToRectangle(box, foe.getBounds())) vHurt(f, foe, f.ax || f.fc);
-}
-
-function vHurt(a, v, dir) {
-  const t = stage.time.now;
-  if (vOver || t < v.iu) return;
   v.iu = t + 1200;
   v.sn = t + 320;
   v.setVelocity((dir || a.fc) * 190, -220);
   sound(sndHurt);
   vCam.shake(140, 0.012);
-  if (v.t) vDrop(v, dir || a.fc);
-  if (--v.hp <= 0) vKO(v, a);
+  v.hp = max(0, v.hp - dmg);
+  if (!v.hp) vKO(v, a);
   else vHealth();
 }
 
@@ -3557,26 +3831,122 @@ function vKO(v, a) {
   if (v.dy) return;
   v.dy = true;
   v.body.enable = false;
+  v.setVelocity(0, 0);
+  v.au.setVisible(false);
+  v.qx.setVisible(false);
   sound(sndDie);
   vCam.shake(300, 0.02);
-  fade(stage, [v], 0, 700);
-  vResult(a);
+  fade(stage, [v, v.hl], 0, 700);
+  v.um.setVisible(false);
+  if (v.ey) fade(stage, [v.ey], 0, 700);
+  vHealth();
+  // The match ends only when this fighter's own team is fully down.
+  const team = v.s === 1 ? vA : vB;
+  if (team.some((o) => !o.dy)) return;
+  vWin(a);
 }
 
-function vFighterUpdate(f, foe, dt, t) {
+function vWin(a) {
+  if (vCin) return;
+  // Cinematic: zoom al ganador, que festeja (sin rotar el sprite: los ojos viven aparte).
+  vCin = a;
+  vWinAt = clock() + 4500;
+  // Centra al ganador, pero ancla el fondo de la vista al suelo para no ver el vacío de abajo.
+  const z = 1.7;
+  vCam.useBounds = false;
+  vCam.pan(a.x, min(a.y - 20, SCREEN_H - SCREEN_H / (2 * z)), 900, 'Sine.easeInOut');
+  vCam.zoomTo(z, 900, 'Sine.easeInOut');
+  const A = VANIM[a.g.k];
+  if (A) a.play(A[1] + a.vs, true);
+  a.setVelocityY(-a.g.jp * 0.8);
+  [700, 1400, 2100, 2800, 3500].forEach((ms) =>
+    later(ms, () => {
+      if (vCin !== a) return;
+      a.setVelocityY(-a.g.jp * 0.8);
+      sound(sndJump);
+    })
+  );
+  // Pulso de escala y dos giros de flipX (f.fc alimenta setFlipX y los ojos).
+  stage.tweens.add({ targets: a, scaleX: 1.15, scaleY: 0.86, duration: 160, yoyo: true, repeat: 9 });
+  later(1100, () => (a.fc = -a.fc));
+  later(1600, () => (a.fc = -a.fc));
+  vBanner = label(stage, a.x, a.y - (a.g.hh || 28) - 22, '¡' + vWho(a) + ' GANA!', 0xff1a1a, 2).setDepth(60);
+  vUI.push(vBanner);
+  later(900, () => lightning(1));
+}
+
+const vWho = (w) => (w.s === 1 ? (v2v2 ? 'JUGADOR 1 Y 2' : 'JUGADOR 1') : vPC ? 'LA PC' : 'JUGADOR 2');
+
+// Pickup bubbles: a heart, an x2 action charge, or a 4s shield. They drift down
+// random spots of the arena and fade away if nobody pops them in time.
+const VBUB_MS = 9000; // how long a bubble waits to be popped
+
+function vSpawnBubble(t) {
+  const r = random();
+  const kd = r < 0.45 ? 'h' : r < 0.75 ? 'x' : 's';
+  const b = image(stage, between(60, 580), between(175, 400), 'bub_' + kd, 14);
+  b.kd = kd;
+  b.ex = t + VBUB_MS;
+  b.by = b.y;
+  b.ph = random() * 6;
+  vBub.push(b);
+}
+
+function vUpdateBubbles(t) {
+  if (t > vBubAt && vBub.length < 3) {
+    vSpawnBubble(t);
+    vBubAt = t + between(5000, 9000);
+  }
+  for (const b of [...vBub]) {
+    b.y = b.by + sin(t / 520 + b.ph) * 5;
+    const left = b.ex - t;
+    b.setAlpha(left < 2200 ? max(0, left / 2200) : 1);
+    if (left <= 0) {
+      b.destroy();
+      vBub.splice(vBub.indexOf(b), 1);
+      continue;
+    }
+    for (const f of [...vA, ...vB])
+      if (!f.dy && hypot(f.x - b.x, f.y - 12 - b.y) < 18) {
+        b.destroy();
+        vBub.splice(vBub.indexOf(b), 1);
+        if (b.kd === 'h') {
+          f.hp = min(VHP, f.hp + 1);
+          vHealth();
+          sound(sndPickup);
+        } else if (b.kd === 'x') {
+          f.q2 = t + 8000;
+          sound(sndNewTool);
+        } else {
+          f.sd = t + 4000;
+          sound(sndCheckpoint);
+        }
+        break;
+      }
+  }
+}
+
+function vFighterUpdate(f, dt, t) {
   const b = f.body;
+  if (f.dy) return; // the loser is disabled and fading
   const g = b.blocked.down;
   if (g) f.lg = t;
   f.og = g;
-  f.co.setVisible(false);
   if (vOver) return f.setVelocityX(0);
+  const foe = vTarget(f);
   let ix = 0;
   let ij = false;
   let ia = false;
   let jump = null;
   let use = null;
-  if (f.hm) {
-    const p = f.s === 1;
+  if (vCin) {
+    // Victory pose: no input, only gravity and animation.
+    f.aa = f.fc > 0 ? 0 : PI;
+    f.ax = f.fc;
+    f.ay = 0;
+    f.am = false;
+  } else if (f.hm) {
+    const p = !f.ct;
     jump = p ? B_JUMP : C2B;
     use = p ? B_USE : C2A;
     ix = (down(p ? B_RIGHT : C2R) ? 1 : 0) - (down(p ? B_LEFT : C2L) ? 1 : 0);
@@ -3597,12 +3967,12 @@ function vFighterUpdate(f, foe, dt, t) {
       f.ax = f.fc;
       f.ay = 0;
     }
-    if (tap(p ? B_DASH : C2C) && t > f.su + 400) {
+    if (tap(p ? B_DASH : C2C) && t > f.su + 400 && t > f.sn) {
       f.su = t + 160;
       f.sn = t + 160;
       f.setVelocityX(f.fc * 420);
     }
-  } else {
+  } else if (foe) {
     versusAI(f, foe, dt, t);
     ix = f.ix;
     ij = f.ij;
@@ -3628,15 +3998,19 @@ function vFighterUpdate(f, foe, dt, t) {
     }
   }
   if (jump && untap(jump) && b.velocity.y < 0) f.setVelocityY(b.velocity.y * 0.45);
-  if (f.t === UMBRELLA && jump && !g && down(jump) && b.velocity.y > 0) f.setVelocityY(min(b.velocity.y, GLIDE_FALL));
-  if (f.t === FLASHLIGHT) {
-    if (f.hm ? f.am : ia) vTorch(f, foe, t);
-  } else if (ia && t > f.ac && t > f.sn) vAttack(f, foe, t);
+
+  // Any fighter can glide while holding jump on the way down; the umbrella opens.
+  const gl = !!jump && !g && down(jump) && b.velocity.y > 0;
+  if (gl) f.setVelocityY(min(b.velocity.y, GLIDE_FALL));
+  f.um.setVisible(gl).setPosition(f.x, f.y - f.g.uh);
+
+  if (ia && t > f.ac && t > f.sn) vAtk(f, t);
+
   const A = VANIM[f.g.k];
   const run = g && abs(b.velocity.x) > 5;
   if (A) {
-    if (!g) f.play(A[2], true);
-    else if (run) f.play(A[1], true);
+    if (!g) f.play(A[2] + f.vs, true);
+    else if (run || vCin) f.play(A[1] + f.vs, true);
     else {
       f.anims.stop();
       f.setFrame(0);
@@ -3644,45 +4018,84 @@ function vFighterUpdate(f, foe, dt, t) {
   }
   f.setFlipX(f.fc < 0);
   f.setAlpha(t < f.iu && floor(t / 70) % 2 ? 0.35 : 1);
-  const h = TOOL_HOLD[f.t] || [8, 11, 0.6];
-  f.hl
-    .setVisible(!!f.t)
-    .setTexture(f.t ? 'tool_' + f.t : 'tool_' + FLASHLIGHT)
-    .setFlipX(!f.am && f.fc < 0)
-    .setPosition(f.x + f.ax * h[0], f.y - h[1] + f.ay * h[0])
-    .setScale(h[2])
-    .setRotation(f.am ? f.aa : f.fc * 0.5);
-  if (f.ey) f.ey.setPosition(f.x + (f.fc < 0 ? -2 : 2), f.y - (f.g.k === 'silbon' ? 42 : 27)).setFlipX(f.fc < 0);
+
+  // EL ESPANTO's embestida connects on contact; the x2 reverse pass doubles it.
+  if (f.cg && t < f.cg && !vOver)
+    for (const o of vFoes(f))
+      if (!o.dy && Intersects.RectangleToRectangle(f.getBounds(), o.getBounds())) {
+        f.cg = 0;
+        vHurt(f, o, f.fc, f.dg ? 2 : 1, f.dg); // the reverse pass pierces i-frames
+        break;
+      }
+
+  const w = f.wt;
+  if (w) {
+    const h = TOOL_HOLD[w];
+    const ch = w === CROWBAR;
+    const bt = w === REVOLVER && f.g.k === 'campesino'; // the llanero holds a bottle
+    const sw = max(0, (f.sw - t) / 260);
+    // CROWBAR sweeps from up (-1.2) to down (+1.4); others recoil back. Same
+    // reach, height and scale the story mode gives the tool.
+    const tilt = ch ? (sw ? 1.4 - 2.6 * sw : 0.5) : -0.6 * sw;
+    f.hl
+      .setVisible(!gl)
+      .setTexture(bt ? 'bottle' : 'tool_' + w)
+      .setFlipX(!f.am && f.fc < 0)
+      .setPosition(f.x + f.ax * h[0], f.y - h[1] + f.ay * h[0])
+      .setScale(bt ? 1.2 : h[2])
+      .setRotation(f.am ? f.aa + tilt : f.fc * tilt);
+  } else f.hl.setVisible(false);
+  if (f.ey) f.ey.setPosition(f.x + (f.fc < 0 ? -2 : 2) * f.scaleX, f.y - f.g.hh * f.scaleY).setFlipX(f.fc < 0);
+
+  // Power timers: the shield aura and the x2 tag ride along with the fighter.
+  f.au.setVisible(t < f.sd).setPosition(f.x, f.y - (f.g.hh || 20)).setScale(0.5 + 0.06 * sin(t / 90)).setAlpha(0.4 + 0.15 * sin(t / 70));
+  f.qx.setVisible(t < f.q2).setPosition(f.x, f.y - (f.g.hh || 20) - 26);
 }
 
 function vStep(t, dt) {
-  vSpawn(t);
-  vFighterUpdate(vF1, vF2, dt, t);
-  vFighterUpdate(vF2, vF1, dt, t);
-  for (const it of vItems.getChildren()) if (it.gw) it.gw.setPosition(it.x, it.y).setScale(0.78 + 0.05 * sin(t / 240 + it.y * 0.11)).setAlpha(0.2 + 0.08 * sin(t / 190 + it.x * 0.13));
+  if (vCin && t >= vWinAt) return vResult(vCin);
+  for (const f of vA) vFighterUpdate(f, dt, t);
+  for (const f of vB) vFighterUpdate(f, dt, t);
+  if (!vCin) vUpdateBubbles(t); // the bubbles freeze during the victory pose
   vHealth();
 }
 
 function vHealth() {
-  if (!vHearts || !vF1) return;
-  for (let i = 0; i < 3; i++) {
-    vHearts[i * 2].setFrame(i < vF1.hp ? 0 : 1);
-    vHearts[i * 2 + 1].setFrame(i < vF2.hp ? 0 : 1);
-  }
+  if (!vHearts || !vA) return;
+  for (const team of [vA, vB]) for (const f of team) f.ht.forEach((h, i) => h.setFrame(i < f.hp ? 0 : 1));
 }
 
 function vResult(winner) {
-  vOver = winner;
+  vCin = 0;
+  vWinAt = 0;
+  vOver = winner || 1;
+  if (!winner) vPauseAt = clock();
   vMode = 3;
   vSel = 0;
-  const who = winner ? (winner === vF1 ? 'JUGADOR 1' : vPC ? 'LA PC' : 'JUGADOR 2') : null;
+  stage.physics.pause();
+  const who = winner ? vWho(winner) : null;
   vClearUI();
-  vUI = [
-    stage.add.rectangle(320, 290, 440, 240, 0x0e1320, 0.82).setStrokeStyle(1, 0x2b3648).setDepth(1),
-    label(stage, 320, 205, winner ? '¡GANO ' + who + '!' : 'PAUSA', winner ? 0xff1a1a : 0xffffff, 3).setDepth(20),
-  ];
-  vNavItems = ['REVANCHA', 'ELEGIR PERSONAJES', 'VOLVER AL INICIO'].map((t, i) => label(stage, 320, 285 + i * 40, t, 0xffffff, 2).setDepth(20));
-  vUI.push(...vNavItems);
+  clearTaps();
+  const tok = ++vNavT;
+  // La pausa va por encima de todo y sin espera; la victoria deja al personaje sobre el panel.
+  const d = winner ? 1 : 70;
+  vUI = [vRect(320, 290, 440, 240, 0x0e1320, 0.82, d), vLab(320, 205, winner ? '¡GANO ' + who + '!' : 'PAUSA', winner ? 0xff1a1a : 0xffffff, 3, d + 20)];
+  const make = () => {
+    vNavItems = ['REVANCHA', 'ELEGIR PERSONAJES', 'VOLVER AL INICIO'].map((t, i) => vLab(320, 285 + i * 40, t, 0xffffff, 2, d + 20));
+    vUI.push(...vNavItems);
+  };
+  if (winner) {
+    // Las opciones (y su input) recién existen a los 2 s, y descartan taps del interim.
+    later(2000, () => {
+      if (tok !== vNavT || vMode !== 3) return;
+      make();
+      clearTaps();
+      sound(sndPoke);
+    });
+  } else {
+    make();
+    clearTaps();
+  }
 }
 
 const VersusScene = {
@@ -3696,14 +4109,23 @@ const VersusScene = {
     stage.physics.world.setBounds(0, 0, SCREEN_W, SCREEN_H);
     vCam.setBounds(0, 0, SCREEN_W, SCREEN_H);
     vCam.fadeIn(600, 0, 0, 0);
-    vItems = stage.physics.add.group();
-    stage.physics.add.collider(vItems, vLayer);
+    glitch = addCameraFx(vCam, 0.06);
+    startStorm(3000, 7000, 0.45);
+    vBones = stage.physics.add.group();
+    stage.physics.add.collider(vBones, vLayer, (b) => b.destroy());
     vCols = [];
     vUI = [];
-    vF1 = vF2 = null;
-    vHearts = null;
-    vOver = null;
-    vNextAt = 0;
+    vNavItems = null;
+    vA = vB = null;
+    vHearts = vBub = null;
+    vOver = vCin = null;
+    vWinAt = vBanner = vNavT = 0;
+    vRoll = vAiN = vRollAt = 0;
+    v2v2 = false;
+    vPk = [0, 0, 0, 0];
+    vLk = [false, false, false, false];
+    vRects = [];
+    vAiT = [];
     initAudio();
     startMusic();
     vMenu();
@@ -3712,23 +4134,34 @@ const VersusScene = {
 
   update(t, dt) {
     const d = min(dt, 50) / 1000;
+    updateStorm(d);
+    glitch.tk(d); // sin esto el destello del rayo deja el shader deformando bloques para siempre
     if (vMode === 2) {
-      if (tap(ST1) || tap(ST2)) {
+      if (!vCin && (tap(ST1) || tap(ST2))) {
         clearTaps();
         return vResult(null);
       }
       return vStep(t, d);
     }
-    if (vMode === 1) return vSelectUpdate();
-    if (vNavUpdate()) {
-      if (vSel === 2) return stage.scene.start('Title');
-      if (vMode === 0) {
-        vPC = vSel === 0;
-        sound(sndNewTool);
-        vSelect();
-      } else if (vSel === 0) vFight();
-      else vSelect();
+    if (vMode === 3) {
+      // START solo reanuda la pausa; tras un KO el combate ya terminó.
+      if (vOver === 1 && (tap(ST1) || tap(ST2))) {
+        clearTaps();
+        return vResume();
+      }
+      const s = vNavUpdate();
+      if (s < 0) return;
+      if (s === 2) return stage.scene.start('Title');
+      return s === 0 ? vFight() : vSelect();
     }
+    if (vMode === 1) return vSelectUpdate();
+    const s = vNavUpdate();
+    if (s < 0) return;
+    if (s === 3) return stage.scene.start('Title');
+    vPC = s === 0 || s === 2;
+    v2v2 = s === 2;
+    sound(sndNewTool);
+    vSelect();
   },
 };
 
