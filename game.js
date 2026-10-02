@@ -1307,13 +1307,14 @@ function makeFx() {
 // (the top of the ground under it), so its feet are at y * 16.
 
 const T = 16;
-const OX = 48; // tiles of intro forest prepended before the old world
-const BASE_W = 192; // width of the world before the forest was prepended
-const W = BASE_W + OX;
-const ARENA_X = 150; // first column of the ruins where El Silbon is fought
-const ARENA_Y = 30;
-const H = 40;
-const CAVE_Y = 28;
+const W = 223;
+const H = 70;
+const GROUND = 57; // row of the floor the child walks out onto
+const VEIL_X = 34; // the veiled pillar that closes off the woods
+const CAVE_Y = GROUND + 2;
+const WALL_X = 79; // the cracked wall; everything from here east is church stone
+const ARENA_X = 181; // first column of the ruins where El Silbon is fought
+const ARENA_Y = 60;
 const SCREEN_W = 640;
 const SCREEN_H = 480;
 
@@ -1329,7 +1330,7 @@ let runId = 0; // id of this run, so its saved score is replaced rather than rep
 const hard = (k = 0.12) => 1 + min(night, 6) * k;
 const earn = (pts) => (score += floor(pts) * (night + 1));
 // Where the extra monsters of later nights may stand: six shades, then four bats, as x, y pairs.
-const SLOTS = [29, 26, 68, 26, 80, 11, 74, 36, 143, 24, 122, 9, 24, 19, 50, 31, 98, 9, 123, 5];
+const SLOTS = [44, 57, 60, 57, 72, 66, 106, 35, 121, 38, 146, 11, 48, 62, 90, 30, 130, 10, 158, 7];
 
 // Best runs, kept as five [score, night, run, initials] entries under one key.
 const TOP_KEY = 'el-apagon:top';
@@ -1354,11 +1355,11 @@ async function saveScore(name = '') {
 }
 
 function buildWorld() {
-  // Built BASE_W wide; the forest's columns are prepended once it is all in place.
-  const blank = () => Array.from({ length: H }, () => new Array(BASE_W).fill(EMPTY));
+  const blank = () => Array.from({ length: H }, () => new Array(W).fill(EMPTY));
   const grid = blank();
   const interior = blank();
   const ents = [];
+  const G = GROUND;
 
   const fill = (x1, y1, x2, y2, v = SOLID, g = grid) => {
     for (let y = y1; y <= y2; y++) for (let x = x1; x <= x2; x++) g[y][x] = v;
@@ -1375,132 +1376,152 @@ function buildWorld() {
     fill(x1, y1, x2, y2, EMPTY);
     for (let y = y1; y <= y2; y++) for (let x = x1; x <= x2; x++) one('cracked', x, y);
   };
-  const spikes = (x1, x2, y, abyss) => {
-    for (let x = x1; x <= x2; x++) one('spikes', x, y, abyss);
+  // `deadly` spikes kill outright; the others only bite.
+  const spikes = (x1, x2, y, deadly) => {
+    for (let x = x1; x <= x2; x++) one('spikes', x, y, deadly);
   };
 
-  // The base world; the forest is prepended and the outer shell added once it is slid across.
-  fill(ARENA_X - 2, 0, ARENA_X - 1, H - 1); // the church's east wall; the ruins lie beyond it
-  fill(ARENA_X, ARENA_Y, BASE_W - 3, H - 3);
-
-  // Llanos flatlands: dry earth, leafless trees and low scrub.
-  fill(2, 26, 33, 37);
-  fill(12, 25, 16, 25);
-  fill(24, 24, 27, 25);
-  one('shrine', 8, 26, true); // already lit
-  e('tree', 3, 26, 21, 26);
-  one('tree', 12, 25, true); // flipped
-  one('tree', 29, 26, true);
-  e('scrub', 10, 26, 18, 26, 31, 26, 24, 24);
-  e('grave', 14, 25);
-  e('cross', 25, 24);
-  e('shade', 20, 26);
-  e('candle', 11, 26, 30, 26);
-
-  // Cave mouth into the cerro, sealed by a veiled door.
-  fill(34, 0, 35, 20);
-  fill(34, 26, 35, 37);
-  one('veil', 34, 21, 2, 5); // width, height
-
-  // Open hillside: the long climb up the cerro, sky and grove behind.
-  fill(36, 26, 89, 27); // hillside floor (the crypt lies below)
-  fill(88, 0, 89, 6); // right wall, upper
-  fill(88, 11, 89, 37); // right wall, lower (opening at rows 7-10 onto the chasm)
-
-  beam(40, 45, 23);
-  beam(49, 53, 20);
-  beam(56, 60, 17);
-  beam(63, 67, 14);
-  beam(70, 87, 11); // gallery
-
-  e('shrine', 38, 26);
-  one('tool', 78, 11, CROWBAR);
-  cracked(44, 26, 46, 27); // way down into the crypt
-  e('tree', 40, 26, 68, 26, 86, 11);
-  one('tree', 52, 26, true);
-  e('scrub', 43, 23, 51, 20, 58, 17, 65, 14, 75, 11, 83, 11, 50, 26, 84, 26);
-  e('candle', 71, 11, 86, 11);
-  e('shade', 58, 26, 78, 26);
-  e('bat', 55, 12, 74, 7);
-
-  // Crypt
-  fill(36, 36, 87, 37); // crypt floor
-  fill(55, 36, 59, 37, EMPTY); // spike pit
-  fill(67, 36, 71, 37, EMPTY); // spike pit
-  spikes(55, 59, 38);
-  spikes(67, 71, 38);
-  inside(36, 28, 87, 37);
-  one('veil', 62, 28, 2, 8);
-  e('shrine', 49, 36);
-  one('tool', 44, 36, UMBRELLA);
-  e('shade', 52, 36, 77, 36);
-  e('bat', 75, 31);
-  e('candle', 40, 36, 65, 36, 80, 36);
-  // Shaft back up to the hillside.
-  fill(85, 26, 87, 27, EMPTY);
-  beam(85, 87, 33);
-  beam(85, 87, 30);
-  beam(85, 87, 27);
-
-  // Chasm
-  spikes(90, 107, 38, true);
-
-  // The church. The door opens onto the steps under the bell tower, and the bell
-  // hangs right overhead, but the way to it is the long one: down into the nave,
-  // through the retablo behind the altar, up the shaft and back across the vault.
-  fill(108, 24, 147, 37); // nave floor
-  fill(106, 17, 117, 23); // entrance steps, and the lip outside the door
-  fill(108, 0, 109, 12); // outer wall (door at rows 13-16)
-  fill(108, 0, 147, 1); // roof
-  inside(110, 2, 147, 23);
-  fill(110, 9, 125, 9); // bell loft
-  fill(138, 6, 139, 23); // retablo
-  cracked(138, 20, 139, 23);
-  beam(118, 120, 18); // back up to the door from the nave
-  beam(121, 123, 21);
-  for (let y = 9; y < 24; y += 3) beam(140 + (y % 6), 143 + (y % 6), y); // shaft behind the retablo
-  beam(140, 147, 6);
-  // The chandelier hangs over the nave only on the first night. After that it lies
-  // where it fell, and the vault has to be glided.
-  if (!night) beam(127, 129, 8);
-  one('candelabra', 128, night ? 24 : 8);
-  e('shrine', 112, 17, 135, 24); // the door, and the altar
-  e('shade', 128, 24, 134, 24);
-  one('veil', 118, 2, 2, 7);
-  e('bat', 133, 4, 144, 14);
-  e('candle', 116, 17, 121, 24, 146, 24, 141, 6);
-  e('candelabra', 133, 24, 137, 24);
-  e('pillar', 125, 2, 131, 2, 137, 2);
-  e('arch', 128, 2, 134, 2);
-  e('window', 128, 11, 134, 11, 114, 3, 114, 10.5, 143, 12);
-  e('cross', 138.5, 6);
-  e('bell', 114, 2);
-
-  // Later nights: more things wake and the blackout spreads, the same way for every player.
-  // Done before the slide below, so SLOTS stay in the built world's own columns.
-  const r = rng(night * 2654435761);
-  // Walk the slots in strides of three from a random start, so none repeats.
-  for (let i = 0, k = floor(r() * 10); night && i <= min(night, 6); i++, k = (k + 3) % 10) one(k < 6 ? 'shade' : 'bat', SLOTS[k * 2], SLOTS[k * 2 + 1]);
-
-  // Slide the whole built world right, leaving the forest in front of it.
-  for (const row of [...grid, ...interior]) row.unshift(...new Array(OX).fill(EMPTY));
-  for (const ent of ents) ent.x += OX;
-
-  // World shell
+  // World shell, and the ruins beyond the church's east wall.
   fill(0, 0, 1, H - 1);
   fill(W - 2, 0, W - 1, H - 1);
   fill(0, H - 2, W - 1, H - 1);
+  fill(ARENA_X - 2, 0, ARENA_X - 1, H - 1);
+  fill(ARENA_X, ARENA_Y, W - 3, H - 3);
 
-  // Intro forest: the child leaves the house and walks east toward the llanos.
-  fill(2, 26, OX + 1, H - 1); // floor + buried rock, which the biome draws black
-  one('house', 6, 26);
-  one('shrine', 12, 26, true); // the cabin is the first checkpoint
-  for (let i = 0; i < 5; i++) {
-    const x = 21 + i * 6;
-    one('tree', x, 26, i % 3 === 1, 1.3 + (i % 4) * 0.35);
-  }
-  for (let x = 24; x <= OX - 2; x += 9) one('scrub', x, 26);
-  e('foresteyes', 19, 23, 30, 26, 42, 25);
+  // The woods: the child finds the flashlight and meets the first shades.
+  fill(2, G, 80, H - 1);
+  fill(19, G - 1, 21, G - 1);
+  fill(26, G - 2, 30, G - 1);
+  one('shrine', 10, G, true); // already lit: the first checkpoint
+  one('tool', 13, G, FLASHLIGHT);
+  for (let i = 0; i < 4; i++) one('tree', 3 + i * 10, G, i % 3 === 1, 1.3 + (i % 4) * 0.35);
+  e('scrub', 15, G, 24, G, 28, G - 2);
+  e('foresteyes', 12, G - 3, 23, G, 31, G - 1);
+  e('shade', 24, G);
+  e('candle', 20, G - 1, 27, G - 2);
+  e('bat', 30, G - 6);
+
+  // A pillar bars the way east: a veil at its foot, the revolver hidden behind its top.
+  fill(VEIL_X, 30, VEIL_X + 1, G - 6);
+  one('veil', VEIL_X, G - 5, 2, 5); // width, height
+  beam(31, 33, 31);
+  one('tool', 32, 31, REVOLVER);
+  // The way up to it, unlit: a dash, two blind hops, then a long glide onto the pillar.
+  beam(45, 45, 34);
+  beam(48, 48, 31);
+  beam(52, 52, 27);
+
+  // Llanos: the climb up the cerro to the cracked wall.
+  e('shrine', 38, G);
+  e('shade', 48, G, 55, G, 51, G - 4);
+  beam(46, 52, G - 4);
+  beam(55, 61, G - 7);
+  e('candle', 49, G - 4, 57, G - 7);
+  e('bat', 52, G - 9, 60, G - 10);
+  e('tree', 45, G, 62, G);
+  e('scrub', 40, G, 58, G);
+  e('grave', 60, G);
+  e('cross', 63, G);
+
+  fill(65, G - 10, 78, G - 1); // the cerro
+  e('shrine', 67, G - 10);
+  one('tool', 71, G - 10, UMBRELLA);
+  e('candle', 69, G - 10);
+  e('shade', 75, G - 10);
+  beam(76, 78, G - 13);
+  beam(76, 78, G - 16);
+  beam(76, 78, G - 19);
+  e('candle', 77, G - 16);
+  e('bat', 76, G - 22);
+  // Back west over a gap only the umbrella crosses, then up to the wall.
+  beam(56, 62, G - 19);
+  beam(54, 57, G - 22);
+  beam(59, 61, G - 25);
+  beam(64, 78, G - 28);
+  e('shade', 58, G - 19, 70, G - 28);
+  e('candle', 61, G - 19, 55, G - 22, 60, G - 25, 74, G - 28);
+  e('bat', 57, G - 25, 72, G - 34, 75, G - 34);
+  fill(WALL_X, 14, WALL_X + 1, G - 1);
+  cracked(WALL_X, G - 32, WALL_X + 1, G - 29);
+
+  // The cave under the llanos, down through the hatch: the crowbar lies at its far end.
+  fill(40, G + 2, 79, G + 8, EMPTY);
+  inside(40, G + 2, 79, G + 10);
+  fill(41, G, 43, G + 1, EMPTY);
+  for (let y = G; y < G + 9; y += 3) beam(41, 43, y);
+  fill(54, G + 9, 59, G + 10, EMPTY);
+  fill(70, G + 9, 73, G + 10, EMPTY);
+  spikes(54, 59, G + 11);
+  spikes(70, 73, G + 11);
+  one('veil', 66, G + 2, 2, 7);
+  one('tool', 77, G + 9, CROWBAR);
+  e('shade', 50, G + 9);
+  e('bat', 55, G + 4, 76, G + 4);
+  e('candle', 46, G + 9, 64, G + 9);
+
+  // The church. Past the wall a long glide over the spikes lands at its door; the bell
+  // hangs just overhead, but the way to it is across the pit, up the shaft and back.
+  const F = G - 9; // the pit floor
+  fill(81, F, 178, H - 1);
+  spikes(81, 101, F, true);
+  spikes(113, 170, F, true);
+  fill(99, 0, 178, 1); // roof
+  fill(99, 2, 100, 14);
+  fill(101, 2, 112, 6);
+  fill(101, 14, 112, 14); // bell loft
+  inside(99, 2, 178, F - 1);
+  e('bell', 106, 7);
+  e('candle', 101, 14, 112, 14);
+
+  fill(102, F - 13, 112, F - 1);
+  e('shrine', 104, F - 13);
+  e('candle', 107, F - 13);
+  e('shade', 110, F - 13);
+
+  // Stepping stones over the pit.
+  fill(117, F - 10, 126, F - 9);
+  fill(130, F - 13, 131, F - 9);
+  fill(135, F - 15, 136, F - 15);
+  fill(141, F - 15, 145, F - 15);
+  fill(150, F - 15, 151, F - 15);
+  fill(156, F - 8, 162, F - 7);
+  e('shade', 124, F - 10, 143, F - 15, 160, F - 8);
+  e('candle', 120, F - 10, 130, F - 13, 145, F - 15, 158, F - 8);
+  e('bat', 136, F - 19, 154, F - 18);
+
+  // The shaft in the east end.
+  fill(171, 31, 178, F - 1);
+  beam(167, 170, F - 11);
+  beam(168, 170, F - 14);
+  beam(168, 170, 31);
+  fill(165, 10, 168, 25);
+  for (let y = 13; y < 31; y += 3) beam(y % 2 ? 169 : 176, y % 2 ? 172 : 178, y);
+  beam(169, 178, 10);
+  e('candle', 169, F - 11, 168, 31, 176, 28, 170, 25, 177, 16, 167, 10);
+  e('bat', 174, 26, 171, 16, 175, 5);
+  e('shade', 166, 10);
+
+  // Back west under the roof, over two gaps too wide to jump.
+  fill(138, 11, 150, 12);
+  beam(118, 124, 14);
+  e('shade', 141, 11);
+  e('candle', 143, 11, 150, 11, 123, 14);
+  e('bat', 140, 6);
+  // A forgotten grave on a ledge in the dark under the second gap.
+  fill(132, 23, 138, 23);
+  one('secret', 135, 23);
+
+  one('pillar', 119, 2, F - 2);
+  one('pillar', 125, 2, F - 2);
+  one('pillar', 153, 2, F - 2);
+  one('pillar', 159, 2, F - 2);
+  e('arch', 122, 2, 156, 2);
+  e('window', 122, 17, 156, 17, 108, 22);
+
+  // Later nights: more things wake and the blackout spreads, the same way for every player.
+  const r = rng(night * 2654435761);
+  // Walk the slots in strides of three from a random start, so none repeats.
+  for (let i = 0, k = floor(r() * 10); night && i <= min(night, 6); i++, k = (k + 3) % 10) one(k < 6 ? 'shade' : 'bat', SLOTS[k * 2], SLOTS[k * 2 + 1]);
 
   // Later nights snuff some of the candles.
   return { grid, interior, ents: night ? ents.filter((o) => !/^cand/.test(o.type) || r() > min(0.6, night * 0.15)) : ents };
@@ -1872,12 +1893,12 @@ const PROPS = {
 // Game state (see `stage` above for why it is not on the scene).
 // The world: its grid and entities, tile layer, and what was built from them.
 let world, layer, crackedAt, lights, decals, hintsShown, shades, bats, pickups, crackedGroup, spikeGroup, veilGroup, veils, shrines;
-let checkpoint, bellSprite, belfryBell, ruinBell, bellZone, hills, grove, forestMid, foreTrees;
+let checkpoint, secret, bellSprite, belfryBell, ruinBell, bellZone, hills, grove, forestMid, foreTrees;
 // Particle emitters, and the pieces of the darkness.
 let bloodFx, smokeFx, emberFx, debrisFx, splashFx, glitchFx, darkness, coneGlow, auraGlow, darkPool, dropBars;
 // The child: what they carry and where they point it.
 let player, heldTool, umbrellaOpen, reticle, hearts, inventory, found, equipped, facing, aiming, aimX, aimY, aimAngle;
-let focus, lightCone, flicker, gliding, dead, won, cutscene, falling, crumbling;
+let focus, lightCone, flicker, gliding, dead, won, cutscene, crumbling;
 // Timers (ms on the scene clock, except the two in seconds: attackCooldown and stepTimer).
 let invulnUntil, stunUntil, lastGround, dropUntil, dropRow, attackCooldown, swingUntil, stepTimer, jumpPressedAt, downAt, nightStart;
 let wasGrounded, lastVy, flatCam, wasIndoors;
@@ -1893,9 +1914,7 @@ function buildTilemaps() {
   // A thin crust of textured rock over pure black. Only exposed faces and the
   // cave are drawn; everything buried is opaque darkness, so the world never
   // shows through to the other side.
-  const CAVE_L = 34 + OX;
-  const CAVE_R = 89 + OX;
-  const inCave = (x, y) => x >= CAVE_L && x <= CAVE_R && y >= CAVE_Y - 1;
+  const inCave = (x, y) => x > 37 && x < 82 && y >= CAVE_Y - 1;
   const exposed = (x, y, top) =>
     top ||
     (y > 1 && grid[y - 1][x] === SOLID && grid[y - 2][x] !== SOLID) ||
@@ -1905,7 +1924,7 @@ function buildTilemaps() {
   const solid = (x, y, top) => {
     if (inCave(x, y)) return top ? TILE_ROCK_TOP : TILE_ROCK;
     if (!exposed(x, y, top)) return TILE_BLACK;
-    if (x >= 106 + OX && y < CAVE_Y) return top ? TILE_STONE_TOP : TILE_STONE;
+    if (x >= WALL_X && y < CAVE_Y) return top ? TILE_STONE_TOP : TILE_STONE;
     if (y >= CAVE_Y) return top ? TILE_ROCK_TOP : TILE_ROCK;
     return top ? TILE_DIRT_TOP : TILE_DIRT;
   };
@@ -1992,7 +2011,7 @@ function buildEntities() {
         addLight(px, py - 28, 70);
         break;
       case 'pillar':
-        stage.add.tileSprite(px, py, 20, 22 * T, 'pillar').setOrigin(0.5, 0).setDepth(-8);
+        stage.add.tileSprite(px, py, 20, a * T, 'pillar').setOrigin(0.5, 0).setDepth(-8);
         break;
       case 'bell':
         bellSprite = s;
@@ -2008,7 +2027,11 @@ function buildEntities() {
         break;
       }
       case 'spikes':
-        spikeGroup.create(px, py - 8, 'spikes').ad = a;
+        s = spikeGroup.create(px, py - 8, 'spikes');
+        if ((s.ad = a)) s.setTint(0xff4040);
+        break;
+      case 'secret':
+        secret = image(stage, px, py + 1, 'grave', -2, 0.5, 1);
         break;
       case 'veil': {
         const v = stage.add.tileSprite(px - 8, py, a * T, b * T, 'veil').setOrigin(0).setDepth(3);
@@ -2092,7 +2115,7 @@ function spawnPickup(tool, x, y, vx, vy, expires) {
 
 function buildPlayer() {
   const physics = stage.physics.add;
-  const p = (player = physics.sprite(9.5 * T, 26 * T, 'child', 0));
+  const p = (player = physics.sprite(9.5 * T, GROUND * T, 'child', 0));
   p.setOrigin(0.5, 1).setDepth(10).setCollideWorldBounds(true);
   p.body.setSize(10, 20).setOffset(3, 4).setMaxVelocityY(620);
 
@@ -2424,18 +2447,12 @@ function kill(m) {
 
 function onSpikes(s) {
   if (dead) return;
-  hurt(player.x + (random() - 0.5));
   if (s.ad) {
-    if (!dead && !falling) {
-      falling = true;
-      later(350, () => {
-        falling = false;
-        if (!dead) respawn();
-      });
-    }
-  } else if (player.body.velocity.y >= 0) {
-    player.setVelocityY(-340);
+    hearts = 0;
+    return die();
   }
+  hurt(player.x + (random() - 0.5));
+  if (player.body.velocity.y >= 0) player.setVelocityY(-340);
 }
 
 function updateShade(s, dt, time) {
@@ -2671,8 +2688,16 @@ function updatePlayer(dt, time) {
   const tx = p.x / T;
   const ty = p.y / T;
   const at = (x0, x1, y0, y1) => tx > x0 && tx < x1 && ty > y0 && ty < y1;
-  if (at(27 + OX, 34 + OX, 0, H)) hint('v', 'Un velo de sombra viva. Alumbralo con la linterna.');
-  if (found.has(CROWBAR) && at(40 + OX, 48 + OX, 20, 27) && crackedAt.has(45 + OX + ',26')) hint('f', 'El piso aqui esta agrietado...');
+  if (at(VEIL_X - 7, VEIL_X, GROUND - 6, H)) hint('v', 'Un velo de sombra viva. Alumbralo con la linterna.');
+  if (at(WALL_X - 7, WALL_X, 24, 30) && crackedAt.has(WALL_X + ',28')) hint('f', 'Esta pared esta agrietada...');
+  if (secret && abs(p.x - secret.x) < 12 && abs(p.y - secret.y) < 12) {
+    secret = null;
+    score += 10000;
+    sound(sndNewTool);
+    glitch.hi(0.4);
+    pulseHud();
+    showMessage('Una tumba olvidada: 10000 puntos.', 5000);
+  }
 
   // Free-aim reticle.
   reticle
@@ -2768,7 +2793,7 @@ function silbonIntro() {
   showMessage('Un silbido lejano, muy lejano... el esta aqui.', 4000);
 
   const side = p.x > bellSprite.x ? -1 : 1;
-  const ghost = image(stage, p.x + side * 70, 9 * T, 'silbon', 12, 0.5, 1, 0).setFlipX(side > 0).setAlpha(0);
+  const ghost = image(stage, p.x + side * 70, p.y, 'silbon', 12, 0.5, 1, 0).setFlipX(side > 0).setAlpha(0);
   const eyes = image(stage, ghost.x - side * 2, ghost.y - 42.5, 'eyes', 60).setAlpha(0);
   const flash = whiteout(200);
   fade(stage, [ghost, eyes], 1, 900, 3000);
@@ -2796,7 +2821,7 @@ function silbonIntro() {
 
 // Show or hide the llanos skyline and fence the camera to match.
 function setRuins(on) {
-  const x0 = on ? (ARENA_X + OX) * T : 0;
+  const x0 = on ? ARENA_X * T : 0;
   for (const l of [hills, grove, forestMid, foreTrees]) l.setVisible(!on);
   cam.setBounds(x0, 0, (on ? W - 2 : W) * T - x0, H * T);
 }
@@ -2805,7 +2830,7 @@ function setRuins(on) {
 function startArena() {
   const p = player;
   const physics = stage.physics.add;
-  const x0 = (ARENA_X + OX) * T;
+  const x0 = ARENA_X * T;
   const gy = ARENA_Y * T;
   setRuins(true);
   belfryBell = bellSprite;
@@ -2868,7 +2893,7 @@ function leaveArena() {
   if (equipped === REVOLVER) equipped = TOOLS.find((t) => inventory.has(t)) || null;
   bellSprite = belfryBell;
   setRuins(false);
-  checkpoint = { x: (124 + OX) * T, y: 9 * T };
+  checkpoint = { x: bellSprite.x + 96, y: bellSprite.y + 7 * T };
   whistle(0.14, 76);
 }
 
@@ -2921,7 +2946,7 @@ function updateBoss(time) {
 function throwRevolver() {
   thrown = cutscene = true;
   bones.clear(true, true);
-  const x0 = (ARENA_X + OX) * T;
+  const x0 = ARENA_X * T;
   const gy = ARENA_Y * T;
   const side = player.x > x0 + 320 ? -1 : 1;
   const x = clamp(player.x + side * 130, x0 + 30, x0 + 610);
@@ -3014,9 +3039,9 @@ const GameScene = {
     dead = won = gliding = aiming = thrown = false;
     cutscene = false; // the child stands frozen
     hearts = MAX_HEARTS;
-    inventory = new Set([FLASHLIGHT]);
-    found = new Set([FLASHLIGHT]);
-    equipped = FLASHLIGHT;
+    inventory = new Set();
+    found = new Set();
+    equipped = null;
     facing = flicker = aimX = 1;
     invulnUntil = stunUntil = lastGround = dropUntil = attackCooldown = swingUntil = stepTimer = aimAngle = aimY = 0;
     jumpPressedAt = downAt = NEVER;
@@ -3098,11 +3123,11 @@ const GameScene = {
     updateRainSplashes();
     updateStorm(dt);
     // Parallax: the woods cross-fade into the open llanos as the child walks east.
-    const forest = 1 - min(1, max(0, (player.x - (OX - 4) * T) / (14 * T)));
+    const forest = 1 - min(1, max(0, (player.x - (VEIL_X - 4) * T) / (14 * T)));
     hills.tilePositionX = cam.scrollX * 0.1;
-    hills.y = 10 - cam.scrollY * 0.06;
+    hills.y = 39 - cam.scrollY * 0.06;
     grove.tilePositionX = cam.scrollX * 0.25;
-    grove.y = 21 - cam.scrollY * 0.15;
+    grove.y = 93 - cam.scrollY * 0.15;
     forestMid.tilePositionX = cam.scrollX * 0.5;
     foreTrees.tilePositionX = cam.scrollX * 1.35;
     hills.setAlpha(1 - forest);
@@ -3112,16 +3137,15 @@ const GameScene = {
 
     // On the flat approach the camera holds still vertically, so the woods do
     // not lurch every time the child jumps; the cerro resumes the follow.
-    const flat = player.x < (OX + 34) * T;
+    const flat = player.x < VEIL_X * T;
     if (flat !== flatCam) {
       flatCam = flat;
-      cam.setDeadzone(flat ? 1 : 0, flat ? 600 : 0);
+      cam.setDeadzone(flat ? 1 : 0, flat ? 200 : 0);
     }
 
     // The storm is muffled inside the cave and inside the church.
     const indoors =
-      (player.x > (34 + OX) * T && player.x < (89 + OX) * T && player.y > CAVE_Y * T) ||
-      (player.x > (106 + OX) * T && player.y < CAVE_Y * T);
+      (player.x > 40 * T && player.x < 80 * T && player.y > CAVE_Y * T) || (player.x > 99 * T && player.x < ARENA_X * T);
     if (indoors !== wasIndoors) {
       wasIndoors = indoors;
       setRainVolume(indoors ? 0.5 : 1);
