@@ -75,7 +75,6 @@ const B_DOWN = 'P1_D';
 const B_JUMP = 'P1_2';
 const B_USE = 'P1_1';
 const B_DASH = 'P1_3';
-const B_PREV = 'P1_5';
 const B_NEXT = 'P1_6';
 
 // Audio: everything is synthesised on one shared context, built on the first press.
@@ -1084,14 +1083,18 @@ function makeProps() {
       pen.stroke();
     }
   });
-  // The child's cabin: dark planks, a lit window and a stooped roof.
-  fromCanvas('house', 60, 54, () => {
-    box('#080604', 6, 22, 48, 32);
-    box('#241a10', 8, 24, 44, 28);
-    shape('#080604', 'M0 24L30 4L60 24Z');
-    box('#080604', 22, 34, 14, 20);
-    box('#3a2a18', 23, 35, 12, 19);
-    box('#e0a030', 39, 28, 14, 12);
+  // The child's cabin: dark planks, a chimney, a stooped roof and a window
+  // that is only dim glass here; its candlelight is laid over it in the scene.
+  fromCanvas('house', 84, 76, () => {
+    box('#080604', 58, 8, 9, 20);
+    box('#080604', 8, 30, 68, 46);
+    box('#241a10', 10, 32, 64, 42);
+    for (let x = 18; x < 74; x += 8) box('#1a120a', x, 32, 1, 42);
+    shape('#080604', 'M0 34L42 6L84 34Z');
+    box('#080604', 30, 48, 18, 28);
+    box('#3a2a18', 31, 49, 16, 27);
+    box('#080604', 53, 37, 20, 18);
+    box('#3a2408', 54, 38, 18, 16);
   });
 }
 
@@ -1234,6 +1237,18 @@ function makeBackdrops() {
     for (let x = -10; x < 660; x += 90 + r() * 100) drawTree(x, 440, 40 + r() * 40, 4 + r() * 3, r);
   });
 
+  // Tall dry llanos grass behind the ruins: leaning blades, a few with seed heads.
+  fromCanvas('weeds', 128, 104, () => {
+    const r = rng(31);
+    for (let i = 0; i < 80; i++) {
+      const x = r() * 128;
+      const h = 30 + r() * 74;
+      const tip = x + (r() - 0.5) * 22;
+      shape(i % 3 ? '#0c0b09' : '#1c1711', `M${x} 104L${tip} ${104 - h}L${x + 2 + r()} 104Z`);
+      if (r() > 0.8) pen.fillRect(tip - 1, 104 - h, 2, 6);
+    }
+  });
+
   // Mid forest: tall dark trunks with roots and hanging limbs.
   fromCanvas('forestmid', 640, 480, () => {
     const r = rng(53);
@@ -1293,6 +1308,10 @@ function makeFx() {
   fromCanvas('smoke', 6, 6, () => {
     ink('#b4b4b499');
     circle(3, 3, 3);
+  });
+  fromCanvas('bub', 7, 7, () => {
+    ink('#fff');
+    circle(3.5, 3.5, 2.5, 1);
   });
 }
 
@@ -1736,7 +1755,7 @@ function controlsLegend(scene) {
         img(x, y - 30, 'umbrella_open');
       },
     ],
-    ['CAMBIAR', 'BTN 5/6', (x, y) => TOOLS.slice(0, 3).forEach((t, i) => img(x + (i - 1) * 30, y + 6, 'tool_' + t))],
+    ['CAMBIAR', 'BTN 6', (x, y) => TOOLS.slice(0, 3).forEach((t, i) => img(x + (i - 1) * 30, y + 6, 'tool_' + t))],
     [
       'APUNTAR',
       'BTN 1 Y MOVER',
@@ -1872,9 +1891,9 @@ const PROPS = {
 // Game state (see `stage` above for why it is not on the scene).
 // The world: its grid and entities, tile layer, and what was built from them.
 let world, layer, crackedAt, lights, decals, hintsShown, shades, bats, pickups, crackedGroup, spikeGroup, veilGroup, veils, shrines;
-let checkpoint, bellSprite, belfryBell, ruinBell, bellZone, hills, grove, forestMid, foreTrees;
+let checkpoint, bellSprite, ruins, bellZone, hills, grove, forestMid, foreTrees;
 // Particle emitters, and the pieces of the darkness.
-let bloodFx, smokeFx, emberFx, debrisFx, splashFx, glitchFx, darkness, coneGlow, auraGlow, darkPool, dropBars;
+let bloodFx, smokeFx, bubbleFx, emberFx, debrisFx, splashFx, glitchFx, darkness, coneGlow, auraGlow, darkPool, dropBars;
 // The child: what they carry and where they point it.
 let player, heldTool, umbrellaOpen, reticle, hearts, inventory, found, equipped, facing, aiming, aimX, aimY, aimAngle;
 let focus, lightCone, flicker, gliding, dead, won, cutscene, falling, crumbling;
@@ -1890,23 +1909,25 @@ function buildTilemaps() {
     const map = stage.make.tilemap({ data, tileWidth: T, tileHeight: T });
     return map.createLayer(0, map.addTilesetImage('tiles', 'tiles', T, T, 0, 0), 0, 0).setDepth(depth);
   };
-  // A thin crust of textured rock over pure black. Only exposed faces and the
-  // cave are drawn; everything buried is opaque darkness, so the world never
-  // shows through to the other side.
+  // Rock is lit by the open air it faces and sinks into black the deeper it is
+  // buried, so the ground fades out instead of ending on a hard edge. `depth`
+  // is each solid tile's distance in tiles to the nearest opening, up to 10.
+  const depth = grid.map((row) => row.map((v) => (v === SOLID ? 10 : 0)));
+  for (let d = 1; d < 10; d++) {
+    depth.forEach((row, y) =>
+      row.forEach((v, x) => {
+        if (v === 10 && [row[x - 1], row[x + 1], (depth[y - 1] || 0)[x], (depth[y + 1] || 0)[x]].includes(d - 1)) row[x] = d;
+      }),
+    );
+  }
   const CAVE_L = 34 + OX;
   const CAVE_R = 89 + OX;
   const inCave = (x, y) => x >= CAVE_L && x <= CAVE_R && y >= CAVE_Y - 1;
-  const exposed = (x, y, top) =>
-    top ||
-    (y > 1 && grid[y - 1][x] === SOLID && grid[y - 2][x] !== SOLID) ||
-    (x > 0 && grid[y][x - 1] !== SOLID) ||
-    (x < W - 1 && grid[y][x + 1] !== SOLID) ||
-    (y < H - 1 && grid[y + 1][x] === EMPTY);
   const solid = (x, y, top) => {
     if (inCave(x, y)) return top ? TILE_ROCK_TOP : TILE_ROCK;
-    if (!exposed(x, y, top)) return TILE_BLACK;
     if (x >= 106 + OX && y < CAVE_Y) return top ? TILE_STONE_TOP : TILE_STONE;
-    if (y >= CAVE_Y) return top ? TILE_ROCK_TOP : TILE_ROCK;
+    // West of the cave the ground is earth all the way down.
+    if (y >= CAVE_Y && x >= CAVE_L) return top ? TILE_ROCK_TOP : TILE_ROCK;
     return top ? TILE_DIRT_TOP : TILE_DIRT;
   };
   const bg = (y) => (y >= CAVE_Y ? TILE_CAVE : TILE_BG);
@@ -1921,6 +1942,8 @@ function buildTilemaps() {
   layer.setCollision([TILE_DIRT, TILE_DIRT_TOP, TILE_ROCK, TILE_ROCK_TOP, TILE_STONE, TILE_STONE_TOP, TILE_BLACK]);
   layer.forEachTile((t) => {
     if (t.index === TILE_BEAM) t.setCollision(false, false, true, false);
+    const d = depth[t.y][t.x];
+    if (d && !inCave(t.x, t.y)) t.tint = 0x10101 * round(255 * clamp(1.25 - d / 8, 0, 1));
   });
 }
 
@@ -1928,6 +1951,8 @@ function buildFx() {
   const fx = (key, depth, config) => stage.add.particles(0, 0, key, { emitting: false, ...config }).setDepth(depth);
   bloodFx = fx('blood', 20, { lifespan: range(500, 1100), speed: range(60, 240), angle: range(200, 340), gravityY: 700, scale: ramp(1, 0.4) });
   smokeFx = fx('smoke', 21, { lifespan: 600, speedY: range(-60, -20), speedX: range(-20, 20), alpha: ramp(0.6, 0), scale: ramp(0.6, 1.6) });
+  // Drawn over the darkness: bubbles are how a veil shows itself through the rain.
+  bubbleFx = fx('bub', 61, { lifespan: range(900, 1600), speedY: range(-34, -14), speedX: range(-8, 8), scale: ramp(0.4, 0.9), alpha: ramp(0.5, 0) });
   emberFx = fx('px', 61, { lifespan: 500, speed: range(20, 80), angle: range(220, 320), tint: [0xff1a1a, 0xffffff], scale: ramp(1, 0) });
   debrisFx = fx('chunk', 20, { lifespan: 900, speed: range(40, 200), angle: range(200, 340), gravityY: 800, rotate: range(0, 360) });
   splashFx = fx('px', 15, {
@@ -1968,7 +1993,8 @@ function buildEntities() {
         if (b) s.setScale(b);
         break;
       case 'house':
-        addLight(px + 16, py - 19, 64);
+        // No power in the blackout: the window is a candle, guttering.
+        addLight(px + 21, py - 28, 76).wn = stage.add.rectangle(px + 21, py - 28, 18, 16, 0xe0a030).setDepth(-0.5);
         break;
       case 'foresteyes': {
         const ey = image(stage, px, py, 'eyes', -5).setScale(1.4).setAlpha(0.5);
@@ -2015,6 +2041,11 @@ function buildEntities() {
         veilGroup.add(v);
         v.sn = 1;
         v.rc = new Rectangle(px - 8, py, a * T, b * T);
+        // Eyes over the darkness: they open somewhere in the veil, stare, shut and move.
+        v.ey = [];
+        for (let i = 0; i < b / 3; i++) v.ey.push(image(stage, 0, 0, 'eyes', 61).setAlpha(0));
+        // Faint side edges, no top or bottom, so it reads as a curtain and not a box.
+        v.ed = [0, a * T - 1].map((dx) => stage.add.rectangle(px - 8 + dx, py, 1, b * T, 0xffffff).setOrigin(0).setDepth(61));
         veils.push(v);
         break;
       }
@@ -2103,7 +2134,13 @@ function buildPlayer() {
   // The beam row being dropped through stops holding the child up.
   physics.collider(p, layer, null, (_, t) => t.index !== TILE_BEAM || t.y !== dropRow);
   physics.collider(p, crackedGroup);
-  physics.collider(p, veilGroup);
+  physics.collider(p, veilGroup, (_, v) => {
+    if (!(v.bp > 0.1)) {
+      sound(sndBurn);
+      bubbleFx.emitParticleAt(v.rc.centerX, p.y, 5);
+    }
+    v.bp = 1;
+  });
   const touch = (_, m) => m.dy || !m.active || hurt(m.x);
   physics.overlap(p, shades, touch);
   physics.overlap(p, bats, touch);
@@ -2390,6 +2427,7 @@ function dissolveVeil(v) {
   for (let i = 0; i < 40; i++) glitchFx.emitParticleAt(between(v.rc.left, v.rc.right), between(v.rc.top, v.rc.bottom), 1);
   veils = veils.filter((o) => o !== v);
   v.body.enable = false;
+  for (const e of [...v.ey, ...v.ed]) e.destroy();
   stage.tweens.add({ targets: v, alpha: 0, scaleX: 0.2, duration: 400, onComplete: () => v.destroy() });
 }
 
@@ -2646,7 +2684,6 @@ function updatePlayer(dt, time) {
   gliding = equipped === UMBRELLA && !grounded && down(B_JUMP) && body.velocity.y > 0;
   if (gliding) p.setVelocityY(min(body.velocity.y, GLIDE_FALL));
 
-  if (tap(B_PREV)) cycleTool(-1);
   if (tap(B_NEXT)) cycleTool(1);
 
   p.setFlipX(facing < 0);
@@ -2735,7 +2772,9 @@ function updateDarkness(time) {
   if (!dead) light(p.x, p.y - 12, 80);
   auraGlow.setPosition(p.x, p.y - 12).setVisible(!dead);
   for (const l of lights) {
-    const f = l.fl ? 0.9 + sin(time / 90 + l.x) * 0.05 + random() * 0.05 : 1;
+    // The cabin window swells and sinks slowly, like a candle seen through glass.
+    const f = l.wn ? 0.72 + sin(time / 900) * 0.18 + sin(time / 370) * 0.1 : l.fl ? 0.9 + sin(time / 90 + l.x) * 0.05 + random() * 0.05 : 1;
+    if (l.wn) l.wn.setAlpha(f * f);
     light(l.x, l.y, l.r * f);
     if (l.gw) l.gw.setAlpha(0.06 * f + flash * 0.05);
   }
@@ -2808,14 +2847,12 @@ function startArena() {
   const x0 = (ARENA_X + OX) * T;
   const gy = ARENA_Y * T;
   setRuins(true);
-  belfryBell = bellSprite;
-  if (!ruinBell) {
+  if (!ruins) {
+    ruins = stage.add.tileSprite(x0, gy + 4, (W - 2) * T - x0, 104, 'weeds').setOrigin(0, 1).setDepth(-9);
     for (const [x, h, a] of [[70, 40, -8], [250, 70, 5], [400, 28, 12], [560, 56, -4]]) {
       stage.add.tileSprite(x0 + x, gy + 4, 20, h, 'pillar').setOrigin(0.5, 1).setDepth(-8).setAngle(a);
     }
-    ruinBell = image(stage, x0 + 480, gy + 6, 'bell', -6, 0.5, 1);
   }
-  bellSprite = ruinBell;
 
   checkpoint = { x: x0 + 110, y: gy };
   hearts = MAX_HEARTS;
@@ -2866,7 +2903,6 @@ function leaveArena() {
   inventory.delete(REVOLVER);
   found.delete(REVOLVER);
   if (equipped === REVOLVER) equipped = TOOLS.find((t) => inventory.has(t)) || null;
-  bellSprite = belfryBell;
   setRuins(false);
   checkpoint = { x: (124 + OX) * T, y: 9 * T };
   whistle(0.14, 76);
@@ -2984,14 +3020,10 @@ function win() {
   saveScore();
   sound(sndGreatBell);
   jolt(1200, 0.01, 1);
-  stage.tweens.add({ targets: bellSprite, angle: { from: -14, to: 14 }, duration: 1100, yoyo: true, repeat: 2, ease: 'Sine.inOut' });
   for (const d of [0, 700, 1500, 2300]) later(d, () => lightning(1));
 
   fade(stage, whiteout(200), 1, 2200, 2600);
-  [
-    label(stage, SCREEN_W / 2, SCREEN_H / 2 - 22, 'SUENA LA CAMPANA.', 0, 4),
-    label(stage, SCREEN_W / 2, SCREEN_H / 2 + 18, 'LA LLUVIA TE OLVIDA... POR AHORA', 0x8a0010),
-  ].forEach((t, i) => fade(stage, t.setScrollFactor(0).setDepth(201).setAlpha(0), 1, 1200, 4800 + i * 1200));
+  fade(stage, label(stage, SCREEN_W / 2, SCREEN_H / 2, 'LA LLUVIA TE OLVIDA... POR AHORA', 0x8a0010).setScrollFactor(0).setDepth(201).setAlpha(0), 1, 1200, 4800);
   later(11000, () => nextScene('Game'));
 }
 
@@ -3021,7 +3053,7 @@ const GameScene = {
     invulnUntil = stunUntil = lastGround = dropUntil = attackCooldown = swingUntil = stepTimer = aimAngle = aimY = 0;
     jumpPressedAt = downAt = NEVER;
     dropRow = -1; // beam row being dropped through
-    boss = silbon = ruinBell = null;
+    boss = silbon = ruins = null;
 
     cam = stage.cameras.main;
     glitch = addCameraFx(cam, 0.04);
@@ -3093,6 +3125,18 @@ const GameScene = {
       v.tilePositionX = sin(time / 300) * 3;
       v.ht = max(0, (v.ht || 0) - dt);
       v.setAlpha(0.35 + 0.65 * v.sn * (v.ht > 0 ? 0.6 + random() * 0.4 : 1));
+      v.bp = max(0, (v.bp || 0) - dt * 2);
+      for (const e of v.ed) e.setAlpha((0.1 + 0.6 * v.bp) * (0.75 + 0.25 * sin(time / 400)));
+      for (const e of v.ey) {
+        e.t = (e.t || 0) - dt;
+        if (e.t < 0) {
+          e.t = e.d = 1.5 + random() * 3;
+          e.setPosition(between(v.rc.left + 5, v.rc.right - 5), between(v.rc.top + 8, v.rc.bottom - 12));
+        }
+        // Wide open when walked into, wincing under the flashlight.
+        e.setAlpha(min(1, e.t * 4, (e.d - e.t) * 4) * (0.6 + 0.4 * v.bp) * (v.ht > 0 ? random() : 1));
+      }
+      if (random() < v.rc.height / 1500) bubbleFx.emitParticleAt(between(v.rc.left, v.rc.right), between(v.rc.top + 16, v.rc.bottom), 1);
     }
     updatePickups(time);
     updateRainSplashes();
