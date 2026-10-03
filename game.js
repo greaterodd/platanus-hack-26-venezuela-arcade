@@ -887,7 +887,6 @@ const TILE_BLACK = 9;
 
 // Textures that are nothing but filled rects: key -> [width, height, rects].
 const RECT_ART = {
-  campesino: [16, 26, 'J5063 Y13e2 K5261 L5565 o9711 M6941 F4a88 53b16cb16 Lch12 z5i279i27 L5p219p21'], // straw hat, pale shirt, rolled trousers
   bone: [8, 4, 'I116200246024'],
   grave: [14, 18, 'o13cf3182 z24ae4262 B241c l66274862'],
   cross: [12, 24, 'o404o05c4 A512n16a2'],
@@ -915,18 +914,20 @@ function makeArt(scene) {
   for (const k in RECT_ART) fromCanvas(k, RECT_ART[k][0], RECT_ART[k][1], () => rects(RECT_ART[k][2]));
 
   // El Silbon: a gaunt, too-tall man under a wide hat, a sack of bones on his back. Two walk frames.
+  // The campesino is the same man in straw and a pale shirt, with shorter limbs and eyes of his own.
+  // `cols` colour the hat, its top, the brim, its edge, the face, the brim's shadow, the neck and the coat, outside and in.
+  const man = (cols, limbs, ox) => rects('8287 8281 29k2 29k1 9b66 9b62 ah41 8i8g 9i6g'.split(' ').map((q, i) => cols[i] + q).join(' ') + limbs, ox);
   fromCanvas(
     'silbon',
     48,
     56,
     () => {
-      for (const i of [0, 1]) {
-        // sack, hat, face, coat, arms, then the legs in mid-stride
-        rects('41k59 t2n114q118287 48281 x29k2 B29k1 s9b66 k9b62 5ah41 z8i8g m9i6g t6j2kgj2k s6D22gD22 ' + ['t9y2mdy2m 48T41dT41', 't7y2mfy2m 46T41fT41'][i], i * 24);
-      }
+      // sack, arms, then the legs in mid-stride
+      for (const i of [0, 1]) man('t4xBsk5zm', ' 41k59 t2n114q116j2kgj2k s6D22gD22 ' + ['t9y2mdy2m 48T41dT41', 't7y2mfy2m 46T41fT41'][i], i * 24);
     },
     2,
   );
+  fromCanvas('campesino', 24, 46, () => man('JNKJLKLEF', ' kad11dd11 E6j2cgj2c L6v22gv22 M9y2cdy2c 58J41dJ41'));
 
   fromCanvas('eyes', 8, 4, () => {
     box('#ff000059', 0, 0, 8, 4);
@@ -2976,7 +2977,7 @@ function throwRevolver() {
   const side = player.x > x0 + 320 ? -1 : 1;
   const x = clamp(player.x + side * 130, x0 + 30, x0 + 610);
   const tx = clamp(x, x0 + 170, x0 + 470);
-  const who = image(stage, x, gy, 'campesino', 9, 0.5, 1).setScale(2).setFlipX(side > 0).setAlpha(0);
+  const who = image(stage, x, gy, 'campesino', 9, 0.5, 1).setFlipX(side > 0).setAlpha(0);
   const lamp = addLight(x, gy - 30, 80, true, false);
   const words = label(stage, tx, gy - 76, 'EL SIEMPRE SE APARECE POR AQUI, MUCHACHO').setDepth(62);
   const say = [stage.add.rectangle(tx, gy - 76, 328, 16, 0, 0.85).setDepth(61), words];
@@ -2987,7 +2988,7 @@ function throwRevolver() {
   later(1700, () => {
     words.setText('¡TOMA! ¡DISPARALE!');
     sound(sndSwing);
-    spawnPickup(REVOLVER, x - side * 12, gy - 40, -side * 150, -300);
+    spawnPickup(REVOLVER, x - side * 12, gy - 16, -side * 150, -300);
   });
   later(2700, () => {
     cutscene = false;
