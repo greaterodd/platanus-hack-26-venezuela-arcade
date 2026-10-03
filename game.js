@@ -2373,12 +2373,15 @@ function crumble(tx, ty) {
   for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) later(60, () => crumble(tx + dx, ty + dy));
 }
 
-function inCone(cone, x, y) {
+// Is a body of radius `r` around (x, y) touched by the cone? Testing the bare
+// point let the thin focused beam pass over a monster it was plainly lighting.
+function inCone(cone, x, y, r = 8) {
   const dx = x - cone.x;
   const dy = y - cone.y;
+  const d = hypot(dx, dy);
   return (
-    hypot(dx, dy) <= cone.range &&
-    abs(Phaser.Math.Angle.Wrap(atan2(dy, dx) - cone.angle)) < cone.half &&
+    d <= cone.range + r &&
+    abs(Phaser.Math.Angle.Wrap(atan2(dy, dx) - cone.angle)) < cone.half + atan2(r, d) &&
     lineOfSight(cone.x, cone.y, x, y)
   );
 }
@@ -2387,7 +2390,8 @@ function shineCone(cone, dt) {
   const time = clock();
   for (const m of monsters()) {
     const cy = m.y - (m.tl ? 18 : 0);
-    if (!m.active || m.dy || !inCone(cone, m.x, cy)) continue;
+    // A shade is tall: lit at the chest or at the legs, it burns.
+    if (!m.active || m.dy || !(inCone(cone, m.x, cy) || (m.tl && inCone(cone, m.x, m.y - 6)))) continue;
     m.br = 0.15;
     m.hp -= dt * cone.power * (m.tl ? 1.1 : 2.5);
     if (random() < 0.3) smokeFx.emitParticleAt(m.x, cy, 1);
@@ -2567,9 +2571,17 @@ function die() {
   bigText('TE ENCONTRARON');
   // The first night forgives; after that, being found ends the run and asks for
   // three initials: joystick up/down changes the letter, BOTON 1 confirms it.
+  // The wait is spelled out and counted down, and every press starts it over.
   if (night) {
     const abc = [0, 0, 0];
     let i = 0;
+    let left;
+    const tick = () => {
+      if (i > 2) return;
+      if (!left) return done();
+      showMessage(`Palanca: letra. Boton 1: siguiente. Quedan ${left--}`, 1500);
+      later(1000, tick);
+    };
     const name = () => abc.map((c, j) => (j > i ? '-' : String.fromCharCode(65 + c))).join('');
     const show = () => bigText(`FIN: ${score} - ${name()}`);
     const done = () => {
@@ -2580,14 +2592,16 @@ function die() {
     };
     later(1200, () => {
       show();
+      left = 20;
+      tick();
       anyPress = (code) => {
+        left = 20;
         if (code === B_UP) abc[i] = (abc[i] + 1) % 26;
         if (code === B_DOWN) abc[i] = (abc[i] + 25) % 26;
         if (code === B_USE && ++i > 2) return done();
         show();
       };
     });
-    later(16000, () => i < 3 && done());
     return;
   }
   later(2200, () => {
