@@ -51,15 +51,25 @@ window.addEventListener('keydown', (e) => {
   const code = arcadeCode(e);
   if (!code) return;
   e.preventDefault();
-  if (!held[code]) pressed[code] = true;
+  const fresh = !held[code];
+  if (fresh) pressed[code] = true;
   held[code] = true;
-  if (anyPress) anyPress(code);
+  if (anyPress) anyPress(code, fresh);
 });
 window.addEventListener('keyup', (e) => {
   const code = arcadeCode(e);
   if (!code) return;
   if (held[code]) released[code] = true;
   held[code] = false;
+});
+// A release outside the iframe may never reach us. Do not leave movement or
+// fresh-press checks stuck when focus returns; release a held jump as well.
+window.addEventListener('blur', () => {
+  for (const code of Object.keys(held)) {
+    if (held[code]) released[code] = true;
+    held[code] = false;
+  }
+  pressed = {};
 });
 
 // Did this button go down (or up) since the last check? Consumes the latch.
@@ -1354,24 +1364,41 @@ const SLOTS = [29, 26, 68, 26, 80, 11, 74, 36, 143, 24, 122, 9, 24, 19, 50, 31, 
 // Best runs, kept as five [score, night, run, initials] entries under one key.
 const TOP_KEY = 'el-apagon:top';
 async function loadTop() {
-  try {
-    const r = await window.platanusArcadeStorage.get(TOP_KEY);
-    return (r.found && Array.isArray(r.value) ? r.value : []).filter((o) => Array.isArray(o) && o[0] > 0).slice(0, 5);
-  } catch (err) {
-    return [];
-  }
+  const r = await window.platanusArcadeStorage.get(TOP_KEY);
+  // An unreadable table is not an empty one: never replace scores after a failed read.
+  if (!r || typeof r.found !== 'boolean' || (r.found && !Array.isArray(r.value))) throw new Error('Invalid score data');
+  if (!r.found) return [];
+  return r.value
+    .filter((o) => Array.isArray(o) && o.length === 4 && Number.isSafeInteger(o[0]) && o[0] > 0 && Number.isSafeInteger(o[1]) && o[1] >= 0 && Number.isSafeInteger(o[2]) && o[2] > 0 && typeof o[3] === 'string' && /^(?:[A-Z]{3})?$/.test(o[3]))
+    .map((o) => o.slice(0, 4))
+    .sort((a, b) => b[0] - a[0])
+    .slice(0, 5);
 }
 // Initials are only known once the run is over; each set keeps just its best run.
-async function saveScore(name = '') {
-  const old = (await loadTop()).filter((o) => o[2] !== runId);
-  const prev = old.find((o) => name && o[3] === name);
-  const top = old.filter((o) => o !== prev);
-  top.push(prev && prev[0] > score ? prev : [score, night, runId, name]);
-  top.sort((a, b) => b[0] - a[0]);
-  try {
-    await window.platanusArcadeStorage.set(TOP_KEY, top.slice(0, 5));
-  } catch (err) {}
-  return top.slice(0, 5);
+// Snapshot before waiting; serialize the whole read/modify/write so an older
+// checkpoint cannot overwrite final initials or borrow the next run's state.
+// A hung request keeps later saves queued: the bridge cannot cancel a late write.
+let scoreSaves = Promise.resolve();
+function saveScore(name = '') {
+  const entry = [score, night, runId, name];
+  scoreSaves = scoreSaves.then(async () => {
+    let top = null;
+    try {
+      top = await loadTop();
+      const old = top.filter((o) => o[2] !== entry[2]);
+      const prev = old.find((o) => name && o[3] === name);
+      const ranked = old.filter((o) => o !== prev);
+      ranked.push(prev && prev[0] > entry[0] ? prev : entry);
+      ranked.sort((a, b) => b[0] - a[0]);
+      const next = ranked.slice(0, 5);
+      await window.platanusArcadeStorage.set(TOP_KEY, next);
+      return { top: next, saved: true, retained: next.includes(entry) };
+    } catch (err) {
+      // On a failed write, show only the table that was actually read, not the candidate.
+      return { top, saved: false };
+    }
+  });
+  return scoreSaves;
 }
 // The table: a blood-red heading over one pale run per line.
 function board(scene, x, y, top, scale = 1) {
@@ -1830,7 +1857,7 @@ const TitleScene = {
       lightning(1);
       nextScene('Controls', 700);
     };
-    anyPress = start;
+    anyPress = (code, fresh) => fresh && start();
     stage.events.once('shutdown', () => (anyPress = null));
     stage.input.once('pointerdown', start);
   },
@@ -1861,7 +1888,7 @@ const ControlsScene = {
     controlsLegend(stage, 450);
     let gone;
     const go = () => gone || nextScene('Game', (gone = 700));
-    later(600, () => (anyPress = go));
+    later(600, () => (anyPress = (code, fresh) => fresh && go()));
     later(5000, go);
     stage.events.once('shutdown', () => (anyPress = null));
   },
@@ -2628,24 +2655,47 @@ function die() {
     };
     const name = () => abc.map((c, j) => (j > i ? '-' : String.fromCharCode(65 + c))).join('');
     const show = () => bigText(`FIN: ${score} - ${name()}`);
-    // The table follows the initials and stays until a button or ten seconds pass.
-    const done = async () => {
+    // Persistence must never hold the cabinet hostage. The exit is armed before
+    // saving; a late result belongs only to this scene's lifetime, not its next run.
+    const done = () => {
       i = 3;
       anyPress = null;
-      const top = await saveScore(name());
+      const scene = stage;
+      const overlay = hud;
+      let live = true;
+      let gone = false;
       bigText('');
-      board(hud, SCREEN_W / 2, 152, top, 2);
+      label(overlay, SCREEN_W / 2, 112, `FIN: ${score} - ${name()}`, 0xff1a1a, 2).setDepth(21);
+      const status = label(overlay, SCREEN_W / 2, 340, 'GUARDANDO...', 0x8c8c8c).setDepth(21);
       showMessage('Pulsa un boton', 10000);
-      let gone;
-      const leave = () => gone || nextScene('Title', (gone = 1500));
-      later(400, () => (anyPress = leave));
-      later(10000, leave);
+      const leave = () => {
+        if (!live || gone) return;
+        gone = true;
+        anyPress = null;
+        nextScene('Title', 1500);
+      };
+      const dismiss = (code, fresh) => fresh && leave();
+      scene.events.once('shutdown', () => {
+        live = false;
+        if (anyPress === dismiss) anyPress = null;
+      });
+      scene.time.delayedCall(400, () => {
+        if (live && !gone) anyPress = dismiss;
+      });
+      scene.time.delayedCall(10000, leave);
+      saveScore(name()).then(({ top, saved, retained }) => {
+        if (!live || gone) return;
+        if (top) board(overlay, SCREEN_W / 2, 152, top, 2);
+        status.setText(saved ? (retained ? 'GUARDADO' : 'MEJORES MARCAS CONSERVADAS') : 'GUARDADO NO CONFIRMADO').setTint(saved ? 0xd8d8d8 : 0xff1a1a);
+      });
     };
     later(1200, () => {
       show();
       left = 20;
       tick();
-      anyPress = (code) => {
+      anyPress = (code, fresh) => {
+        // Keep joystick repeat for letters, but require a new press to confirm.
+        if (!fresh && code !== B_UP && code !== B_DOWN) return;
         left = 20;
         if (code === B_UP) abc[i] = (abc[i] + 1) % 26;
         if (code === B_DOWN) abc[i] = (abc[i] + 25) % 26;
