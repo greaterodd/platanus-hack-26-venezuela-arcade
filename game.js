@@ -2289,6 +2289,18 @@ function reclaim(item) {
   showMessage(`${TOOL_NAMES[item.tc]} te espera junto a las velas.`, 3500);
 }
 
+function restoreDroppedTools() {
+  for (const item of [...pickups.getChildren()]) {
+    // Include tools waiting at a shrine, but leave undiscovered tools in the world.
+    if (!found.has(item.tc)) continue;
+    inventory.add(item.tc);
+    if (!equipped) equipped = item.tc;
+    item.destroy();
+  }
+  dropBars.clear();
+  pulseHud();
+}
+
 function updateTools(dt, time) {
   const p = player;
   const tool = equipped;
@@ -2498,6 +2510,7 @@ function onSpikes(s) {
   if (dead) return;
   hurt(player.x + (random() - 0.5));
   if (s.ad) {
+    restoreDroppedTools();
     if (!dead && !falling) {
       falling = true;
       later(350, () => {
@@ -2591,6 +2604,7 @@ function hurt(srcX) {
 }
 
 function die() {
+  restoreDroppedTools();
   dead = true;
   const p = player;
   bleed(p.x, p.y - 12, 60, 5);
@@ -2653,6 +2667,7 @@ function die() {
 }
 
 function respawn() {
+  restoreDroppedTools();
   player.setPosition(checkpoint.x - 14, checkpoint.y - 1).setVelocity(0, 0);
   invulnUntil = clock() + 1500;
   glitch.hi(0.6);
