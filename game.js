@@ -1371,6 +1371,13 @@ async function saveScore(name = '') {
   try {
     await window.platanusArcadeStorage.set(TOP_KEY, top.slice(0, 5));
   } catch (err) {}
+  return top.slice(0, 5);
+}
+// The table: a blood-red heading over one pale run per line.
+function board(scene, x, y, top, scale = 1) {
+  label(scene, x, y, 'MEJORES', 0xff1a1a, scale).setDepth(21);
+  const rows = top.map((o, j) => `${j + 1} ${o[3] || '???'} ${String(o[0]).padStart(6)} N${o[1] + 1}`).join('\n');
+  label(scene, x, y + 12 * scale, rows, 0xd8d8d8, scale).setOrigin(0.5, 0).setLineSpacing(4).setDepth(21);
 }
 
 function buildWorld() {
@@ -1732,8 +1739,9 @@ const BootScene = {
 };
 
 // The controls, shown rather than told: what the child does, then the button
-// that does it. Shared by the title and pause screens.
-function controlsLegend(scene) {
+// that does it. Shared by the pause screen and the briefing before a run, which
+// brings them in one at a time, `step` ms apart.
+function controlsLegend(scene, step) {
   const mid = SCREEN_W / 2;
   const img = (x, y, key, frame) => image(scene, x, y, key, 21, 0.5, 0.5, frame).setScale(2);
   const gfx = scene.add.graphics().setDepth(21);
@@ -1768,12 +1776,17 @@ function controlsLegend(scene) {
     ['DASH', 'BTN 3', (x, y) => img(x, y, 'child', 4)],
   ].forEach(([act, btn, icon], i) => {
     const x = mid + (i - 2.5) * 104;
-    icon(x, 214);
-    label(scene, x, 250, act).setDepth(21);
-    gfx.fillStyle(0x4a4a4a).fillRect(x - 13, 276, 26, 6);
-    if (i) gfx.fillStyle(0xc00010).fillRect(x - 8, 268, 16, 8).fillStyle(0xff1a1a).fillRect(x - 6, 266, 12, 4);
-    else gfx.fillStyle(0x9a9a9a).fillRect(x, 264, 3, 12).fillStyle(0xff1a1a).fillRect(x - 3, 259, 9, 8);
-    label(scene, x, 292, btn, 0x8c8c8c).setDepth(21);
+    const draw = () => {
+      icon(x, 214);
+      label(scene, x, 250, act).setDepth(21);
+      gfx.fillStyle(0x4a4a4a).fillRect(x - 13, 276, 26, 6);
+      if (i) gfx.fillStyle(0xc00010).fillRect(x - 8, 268, 16, 8).fillStyle(0xff1a1a).fillRect(x - 6, 266, 12, 4);
+      else gfx.fillStyle(0x9a9a9a).fillRect(x, 264, 3, 12).fillStyle(0xff1a1a).fillRect(x - 3, 259, 9, 8);
+      label(scene, x, 292, btn, 0x8c8c8c).setDepth(21);
+      if (step) sound(sndClang);
+    };
+    if (step) scene.time.delayedCall(400 + i * step, draw);
+    else draw();
   });
 }
 
@@ -1800,12 +1813,10 @@ const TitleScene = {
     image(stage, mid + 150, ground, 'shade', 8, 0.5, 1, 1).setScale(2).setAlpha(0.8).setFlipX(true);
     titleEyes = [mid - 118, mid + 148].map((x) => image(stage, x, ground - 55, 'eyes', 12).setScale(2));
 
-    titleShadow = image(stage, mid + 3, 98, 'logo', 20).setScale(LOGO_SCALE).setTintFill(0xb00010);
-    titleLogo = image(stage, mid, 96, 'logo', 21).setScale(LOGO_SCALE);
-    controlsLegend(stage);
-    prompt = label(stage, mid, 344, 'PULSA START', 0xffffff, 2).setDepth(21);
-    const best = label(stage, mid, 370, '', 0x8c8c8c).setDepth(21);
-    loadTop().then(([t]) => t && best.active && best.setText(`MEJOR: ${t[3] || '???'} ${t[0]} - NOCHE ${t[1] + 1}`));
+    titleShadow = image(stage, mid + 3, 158, 'logo', 20).setScale(LOGO_SCALE).setTintFill(0xb00010);
+    titleLogo = image(stage, mid, 156, 'logo', 21).setScale(LOGO_SCALE);
+    prompt = label(stage, mid, 300, 'PULSA START', 0xffffff, 2).setDepth(21);
+    label(stage, mid, 462, 'PLATANUS HACK 26 - CARACAS', 0x6e6e6e).setDepth(21);
 
     const start = () => {
       if (starting) return;
@@ -1817,7 +1828,7 @@ const TitleScene = {
       sound(sndGlitch);
       glitch.hi(1);
       lightning(1);
-      nextScene('Game', 700);
+      nextScene('Controls', 700);
     };
     anyPress = start;
     stage.events.once('shutdown', () => (anyPress = null));
@@ -1835,6 +1846,24 @@ const TitleScene = {
     titleLogo.x = mid + jitter;
     titleShadow.x = mid + 3 - jitter * 1.5 + (random() < 0.05 ? 8 : 0);
     for (const e of titleEyes) e.setAlpha(0.6 + random() * 0.4 + stormLevel);
+  },
+};
+
+// The briefing between the title and a run: the controls on black, one after
+// another, then the night. Any button cuts it short.
+const ControlsScene = {
+  key: 'Controls',
+
+  create() {
+    stage = this;
+    cam = stage.cameras.main;
+    label(stage, SCREEN_W / 2, 140, 'CONTROLES', 0xff1a1a, 3);
+    controlsLegend(stage, 450);
+    let gone;
+    const go = () => gone || nextScene('Game', (gone = 700));
+    later(600, () => (anyPress = go));
+    later(5000, go);
+    stage.events.once('shutdown', () => (anyPress = null));
   },
 };
 
@@ -2585,11 +2614,18 @@ function die() {
     };
     const name = () => abc.map((c, j) => (j > i ? '-' : String.fromCharCode(65 + c))).join('');
     const show = () => bigText(`FIN: ${score} - ${name()}`);
-    const done = () => {
+    // The table follows the initials and stays until a button or ten seconds pass.
+    const done = async () => {
       i = 3;
       anyPress = null;
-      saveScore(name());
-      nextScene('Title');
+      const top = await saveScore(name());
+      bigText('');
+      board(hud, SCREEN_W / 2, 152, top, 2);
+      showMessage('Pulsa un boton', 10000);
+      let gone;
+      const leave = () => gone || nextScene('Title', (gone = 1500));
+      later(400, () => (anyPress = leave));
+      later(10000, leave);
     };
     later(1200, () => {
       show();
@@ -3115,7 +3151,8 @@ const GameScene = {
     const dt = min(delta, 50) / 1000;
 
     // START freezes the world; the Pause scene resumes it on the next press.
-    if (tap('START1') || tap('START2')) {
+    // Not once the child is found: any button there belongs to the initials and the table.
+    if (!dead && (tap('START1') || tap('START2'))) {
       stage.scene.launch('Pause');
       stage.scene.pause();
       stage.scene.pause('Hud');
@@ -3217,12 +3254,11 @@ const HudScene = {
   create() {
     hud = this;
     const row = (n, x, y = 14) => Array.from({ length: n }, (_, i) => hud.add.image(x + i * 18, y, 'heart', 0).setScale(2));
-    const slotX = (i) => SCREEN_W - 114 + i * 28;
     heartIcons = row(MAX_HEARTS, 14);
     bossHearts = row(BOSS_HP, SCREEN_W / 2 - 45, 40);
     slotGfx = hud.add.graphics();
-    slotIcons = TOOLS.map((t, i) => hud.add.image(slotX(i), 16, 'tool_' + t));
-    slotUnknown = TOOLS.map((_, i) => label(hud, slotX(i), 16, '?', 0x8a8a8a));
+    slotIcons = TOOLS.map((t) => hud.add.image(0, 16, 'tool_' + t));
+    slotUnknown = TOOLS.map(() => label(hud, 0, 16, '?', 0x8a8a8a));
     toolLabel = label(hud, SCREEN_W - 12, 34, '').setOrigin(1, 0);
     scoreLabel = label(hud, SCREEN_W / 2, 16, '', undefined, 2);
     panel = hud.add.container(0, 0, [...heartIcons, slotGfx, ...slotIcons, ...slotUnknown, ...bossHearts, toolLabel, scoreLabel]);
@@ -3241,14 +3277,16 @@ const HudScene = {
     if (b) pulseHud();
     heartIcons.forEach((h, i) => h.setFrame(hearts - i >= 1 ? 0 : hearts > i ? 2 : 1));
     bossHearts.forEach((h, i) => h.setVisible(!!b).setFrame(b && i < b.hp ? 0 : 1));
+    // The row ends at the right margin, under which the tool's name sits, however many slots show.
+    const first = SCREEN_W - (found.has(REVOLVER) ? 120 : 92);
     TOOLS.forEach((t, i) => {
-      const x = SCREEN_W - 126 + i * 28;
+      const x = first + i * 28;
       const eq = equipped === t;
       const known = found.has(t);
       // The revolver's slot stays hidden until it is thrown to you.
       const shown = i < 3 || known;
-      slotUnknown[i].setVisible(shown && !known);
-      slotIcons[i].setVisible(known).setAlpha(inventory.has(t) ? 1 : dropped.includes(t) && !(floor(time / 150) % 2) ? 0.65 : 0.3);
+      slotUnknown[i].setX(x + 12).setVisible(shown && !known);
+      slotIcons[i].setX(x + 12).setVisible(known).setAlpha(inventory.has(t) ? 1 : dropped.includes(t) && !(floor(time / 150) % 2) ? 0.65 : 0.3);
       if (shown) gr.fillStyle(0x0a0d12, 0.92).fillRect(x, 4, 24, 24).lineStyle(eq ? 2 : 1, eq ? 0xff2a2a : 0xc8d0d8, 1).strokeRect(x, 4, 24, 24);
     });
     scoreLabel.setText(`${score}${night ? ' NOCHE ' + (night + 1) : ''}`);
@@ -3275,6 +3313,6 @@ new Phaser.Game({
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
-  scene: [BootScene, TitleScene, GameScene, HudScene, PauseScene],
+  scene: [BootScene, TitleScene, ControlsScene, GameScene, HudScene, PauseScene],
 });
 })();
